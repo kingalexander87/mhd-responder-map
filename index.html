@@ -358,11 +358,9 @@ async function initMap(){
 }
 window.initMap=initMap;
 </script>
-<script>
-const K=["AIzaSyCXalP4vszPKPOVN9Y5pzNbfjJjF4VN7VY"].join("");
-const s=document.createElement("script");
-s.src="https://maps.googleapis.com/maps/api/js?key="+K+"&callback=initMap";
-document.head.appendChild(s);
+<script async defer
+  src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCXalP4vszPKPOVN9Y5pzNbfjJjF4VN7VY&callback=initMap">
 </script>
 </body>
 </html>
+

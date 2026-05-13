@@ -314,10 +314,11 @@ async function findNearest(){
   const zip=document.getElementById('zip-input').value.trim();
   if(!zip||zip.length<5) return;
   try{
-    const r=await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(zip)}&key=${API_KEY}`);
-    const d=await r.json();
-    if(d.status!=='OK'){alert('Could not find that zip code.');return;}
-    const {lat,lng}=d.results[0].geometry.location;
+const r=await fetch(`https://api.zippopotam.us/us/${zip}`);
+if(!r.ok){alert('Could not find that zip code.');return;}
+const d=await r.json();
+const lat=parseFloat(d.places[0].latitude);
+const lng=parseFloat(d.places[0].longitude);
     const showInactive=document.getElementById('toggle-inactive').checked;
     const ranked=markers
       .filter(({tech})=>COORDS[tech.name]&&(showInactive||!isInactive(tech)))

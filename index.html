@@ -6,30 +6,46 @@
 <title>MHD Safety Responder Map</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:Arial,sans-serif;font-size:13px;background:#f5f7fa;overflow:hidden}
+body{font-family:Arial,sans-serif;font-size:13px;overflow:hidden}
 #app{display:flex;flex-direction:column;height:100vh}
-#toolbar{background:#1F3864;color:#fff;padding:10px 14px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;z-index:10}
-#toolbar h1{font-size:15px;font-weight:700;margin-right:8px;white-space:nowrap}
-.filter-group{display:flex;align-items:center;gap:5px}
+#toolbar{background:#1F3864;color:#fff;padding:8px 12px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;z-index:10}
+#toolbar h1{font-size:14px;font-weight:700;margin-right:6px;white-space:nowrap}
+.filter-group{display:flex;align-items:center;gap:4px}
 .filter-group label{font-size:11px;opacity:.8;white-space:nowrap}
-select,input[type=text]{font-size:12px;padding:4px 8px;border-radius:4px;border:none;background:#2F5496;color:#fff;cursor:pointer}
+select,input[type=text]{font-size:12px;padding:4px 7px;border-radius:4px;border:none;background:#2F5496;color:#fff;cursor:pointer}
 select option{background:#1F3864}
-#search{background:#2F5496;color:#fff;width:150px}
-#search::placeholder{color:rgba(255,255,255,0.5)}
+input[type=text]{background:#2F5496;color:#fff}
+input[type=text]::placeholder{color:rgba(255,255,255,0.5)}
+#zip-input{width:110px}
+#zip-btn{background:#27AE60;color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:700}
+#zip-btn:hover{background:#1E8449}
+.toggle-wrap{display:flex;align-items:center;gap:5px;font-size:11px;opacity:.9}
+.toggle{position:relative;width:34px;height:18px}
+.toggle input{opacity:0;width:0;height:0}
+.slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#2F5496;border-radius:18px;transition:.3s}
+.slider:before{position:absolute;content:"";height:12px;width:12px;left:3px;bottom:3px;background:white;border-radius:50%;transition:.3s}
+input:checked+.slider{background:#27AE60}
+input:checked+.slider:before{transform:translateX(16px)}
+#count-badge{background:rgba(255,255,255,0.15);border-radius:12px;padding:2px 10px;font-size:11px;white-space:nowrap;margin-left:auto}
 #map-container{flex:1;position:relative}
 #map{width:100%;height:100%}
-#legend{position:absolute;bottom:30px;left:10px;background:rgba(255,255,255,0.96);border-radius:8px;padding:10px 12px;font-size:11px;z-index:5;box-shadow:0 2px 8px rgba(0,0,0,0.15)}
-#legend h4{font-size:11px;font-weight:700;margin-bottom:6px;color:#1F3864}
+#legend{position:absolute;bottom:28px;left:10px;background:rgba(255,255,255,0.96);border-radius:8px;padding:10px 12px;font-size:11px;z-index:5;box-shadow:0 2px 8px rgba(0,0,0,0.15);min-width:175px}
+#legend h4{font-size:11px;font-weight:700;margin-bottom:5px;color:#1F3864}
 .legend-item{display:flex;align-items:center;gap:6px;margin-bottom:3px}
 .legend-dot{width:12px;height:12px;border-radius:50%;flex-shrink:0}
-#count-badge{background:rgba(255,255,255,0.2);border-radius:12px;padding:2px 10px;font-size:11px;white-space:nowrap;margin-left:auto}
-.badge{display:inline-block;padding:2px 7px;border-radius:12px;font-size:10px;font-weight:700;margin:2px 2px 2px 0;background:#E8F4FD;color:#1F3864}
-.flag-box{background:#FFF9C4;border:1px solid #F4D03F;border-radius:4px;padding:6px 8px;font-size:11px;color:#7D6608;margin-top:8px}
-#loading{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(255,255,255,0.95);border-radius:10px;padding:24px 32px;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,0.15);z-index:20}
-#loading h3{color:#1F3864;font-size:15px;margin-bottom:8px}
-#loading p{color:#666;font-size:12px}
-#progress-bar{width:220px;height:6px;background:#E0E0E0;border-radius:3px;margin:12px auto 0;overflow:hidden}
-#progress-fill{height:100%;background:#27AE60;border-radius:3px;width:0%;transition:width 0.3s}
+.legend-star{width:14px;height:14px;flex-shrink:0;font-size:14px;line-height:1}
+.legend-div{border-top:1px solid #ddd;margin:5px 0}
+#zip-results{position:absolute;top:10px;left:50%;transform:translateX(-50%);background:#fff;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.2);z-index:10;min-width:300px;max-width:360px;display:none}
+#zip-results-header{background:#1F3864;color:#fff;padding:10px 14px;border-radius:8px 8px 0 0;display:flex;justify-content:space-between;align-items:center;font-size:13px;font-weight:700}
+#zip-close{cursor:pointer;font-size:18px;line-height:1}
+#zip-results-body{padding:10px 14px}
+.zip-row{padding:8px 0;border-bottom:1px solid #f0f0f0;font-size:12px}
+.zip-row:last-child{border-bottom:none}
+.zip-name{font-weight:700;color:#1F3864;font-size:13px}
+.zip-dist{color:#27AE60;font-weight:700;float:right}
+.zip-detail{color:#666;margin-top:2px}
+.badge{display:inline-block;padding:2px 6px;border-radius:10px;font-size:10px;font-weight:700;margin:1px;background:#E8F4FD;color:#1F3864}
+.inactive-badge{background:#f0f0f0;color:#999}
 </style>
 </head>
 <body>
@@ -38,12 +54,12 @@ select option{background:#1F3864}
     <h1>&#x1F5FA; MHD Safety Responder Map</h1>
     <div class="filter-group">
       <label>Region</label>
-      <select id="f-region"><option value="">All regions</option></select>
+      <select id="f-region"><option value="">All</option></select>
     </div>
     <div class="filter-group">
       <label>Service</label>
       <select id="f-service">
-        <option value="">All services</option>
+        <option value="">All</option>
         <option value="Audio">Audio</option>
         <option value="QN Fit">QN Fit</option>
         <option value="QL Fit">QL Fit</option>
@@ -68,11 +84,19 @@ select option{background:#1F3864}
       <label>Bilingual</label>
       <select id="f-bilingual">
         <option value="">All</option>
-        <option value="Yes">Yes only</option>
+        <option value="Yes">Yes</option>
       </select>
     </div>
     <div class="filter-group">
       <input type="text" id="search" placeholder="Search name...">
+    </div>
+    <div class="toggle-wrap">
+      <label class="toggle"><input type="checkbox" id="toggle-inactive"><span class="slider"></span></label>
+      <span>Show inactive</span>
+    </div>
+    <div class="filter-group">
+      <input type="text" id="zip-input" placeholder="Zip code...">
+      <button id="zip-btn">Find Nearest</button>
     </div>
     <span id="count-badge">Loading...</span>
   </div>
@@ -80,34 +104,86 @@ select option{background:#1F3864}
   <div id="map-container">
     <div id="map"></div>
 
-    <div id="loading">
-      <h3>Loading Responder Map</h3>
-      <p id="loading-msg">Fetching technician data...</p>
-      <div id="progress-bar"><div id="progress-fill"></div></div>
-    </div>
-
     <div id="legend">
-      <h4>Rating</h4>
+      <h4>Role</h4>
+      <div class="legend-item"><span class="legend-star" style="color:#2E86C1">&#11088;</span><span style="color:#2E86C1;font-weight:700">Regional Manager</span></div>
+      <div class="legend-item"><span class="legend-star" style="color:#A569BD">&#11088;</span><span style="color:#A569BD;font-weight:700">Service Delivery Mgr</span></div>
+      <div class="legend-item"><div class="legend-dot" style="background:#888"></div><span>Safety Responder</span></div>
+      <div class="legend-div"></div>
+      <h4>Responder Rating</h4>
       <div class="legend-item"><div class="legend-dot" style="background:#1E8449"></div><span>9 &mdash; Full capability</span></div>
       <div class="legend-item"><div class="legend-dot" style="background:#27AE60"></div><span>8 &mdash; Near-full</span></div>
       <div class="legend-item"><div class="legend-dot" style="background:#82E0AA"></div><span>7 &mdash; Strong</span></div>
-      <div class="legend-item"><div class="legend-dot" style="background:#F4D03F"></div><span>6 &mdash; Solid mid-tier</span></div>
+      <div class="legend-item"><div class="legend-dot" style="background:#F4D03F"></div><span>6 &mdash; Mid-tier</span></div>
       <div class="legend-item"><div class="legend-dot" style="background:#F0B27A"></div><span>4&ndash;5 &mdash; Basic+</span></div>
       <div class="legend-item"><div class="legend-dot" style="background:#E74C3C"></div><span>3 &mdash; Audio/Fit only</span></div>
+    </div>
+
+    <div id="zip-results">
+      <div id="zip-results-header">
+        <span id="zip-title">Nearest Responders</span>
+        <span id="zip-close">&#x2715;</span>
+      </div>
+      <div id="zip-results-body"></div>
     </div>
   </div>
 </div>
 
 <script>
+const API_KEY  = "AIzaSyCXalP4vszPKPOVN9Y5pzNbfjJjF4VN7VY";
 const SHEET_ID = "14VbFR3dKRCb2LoalZQxTYMSN8g_IXhmCDQci3112D50";
-const API_KEY  = "AIzaSyDYd59Nq9q2ZA26IQdP0d_2N88HTIiMG1M";
 const SHEET_URL = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/MASTER!A3:U200?key=${API_KEY}`;
 
 const RATING_COLORS = {9:"#1E8449",8:"#27AE60",7:"#82E0AA",6:"#F4D03F",5:"#F39C12",4:"#F0B27A",3:"#E74C3C"};
 
-let map, geocoder, allTechs=[], markers=[], openInfoWindow=null;
+const COORDS = {
+  "Allison, Terri":    {lat:29.5572,lng:-95.7835},
+  "Appleby, Brian":    {lat:40.7282,lng:-73.3271},
+  "Bauer, David":      {lat:34.0967,lng:-118.0956},
+  "Beard, Ryan":       {lat:45.7831,lng:-122.5345},
+  "Blues, David":      {lat:38.9067,lng:-94.6190},
+  "Bonney, Rick":      {lat:38.5739,lng:-90.3455},
+  "Casper, Nick":      {lat:41.6934,lng:-87.6961},
+  "Donohue, Scott":    {lat:34.8762,lng:-83.9793},
+  "Dunkelberg, Clark": {lat:33.8840,lng:-98.5845},
+  "Flaherty, Michael": {lat:35.6701,lng:-82.6096},
+  "Garcia, George":    {lat:38.3565,lng:-121.9877},
+  "Gilling, Bob":      {lat:41.9015,lng:-87.6678},
+  "Hamilton, Eric":    {lat:37.9317,lng:-89.5651},
+  "Harris, Valerie":   {lat:42.3834,lng:-83.1454},
+  "Harrison, Randy":   {lat:44.6365,lng:-123.1059},
+  "Hemingway, Sean":   {lat:26.1901,lng:-80.0959},
+  "Hix, Todd":         {lat:34.5700,lng:-112.4685},
+  "Hughes, Michael":   {lat:40.1737,lng:-80.2462},
+  "Jacob, John":       {lat:28.2108,lng:-82.4735},
+  "Johnson, Curtis":   {lat:26.0056,lng:-80.2534},
+  "Jones, Dan":        {lat:35.5829,lng:-78.7997},
+  "Kearns, Brad":      {lat:47.2793,lng:-122.2284},
+  "Kelly, Tim":        {lat:40.0918,lng:-82.6835},
+  "McFarland, Ryan":   {lat:35.2271,lng:-80.8431},
+  "Mills, Steve":      {lat:38.9498,lng:-76.1947},
+  "Monteau, Don":      {lat:30.7974,lng:-81.6957},
+  "Moreno, Ernie":     {lat:33.9425,lng:-117.2297},
+  "Nicholas, Sidney":  {lat:42.3314,lng:-83.0458},
+  "Payton, Treina":    {lat:37.5407,lng:-77.4360},
+  "Phillips, Tony":    {lat:35.3960,lng:-80.6206},
+  "Riley, Bob":        {lat:35.6729,lng:-81.2201},
+  "Robins, David":     {lat:31.7619,lng:-106.4850},
+  "Sparger, Jeff":     {lat:31.8479,lng:-106.3009},
+  "Staycoff, Rob":     {lat:45.2594,lng:-93.4563},
+  "Talps, Bernard":    {lat:33.6773,lng:-84.7388},
+  "Torres, Andres":    {lat:36.0060,lng:-115.1854},
+  "Tubberville, Jack": {lat:35.5290,lng:-86.5747},
+  "Wagner, James":     {lat:35.8326,lng:-78.6436},
+  "Werner, Thomas":    {lat:31.7093,lng:-99.0018},
+  "Whicker, Steven":   {lat:39.7084,lng:-86.3027},
+};
 
-function ratingColor(r){ return RATING_COLORS[r] || "#999"; }
+let map, allTechs=[], markers=[], openInfoWindow=null;
+
+function isInactive(t){ return t.notes&&t.notes.toLowerCase().includes("on leave"); }
+function isRM(t){ return t.title&&t.title.toLowerCase().includes("regional manager"); }
+function isSDM(t){ return t.title&&t.title.toLowerCase().includes("service delivery"); }
 
 function parseServices(row){
   const s=[];
@@ -124,194 +200,164 @@ function parseServices(row){
 
 function techFromRow(row){
   return {
-    name:      row[0]||"",
-    region:    row[1]||"",
-    state:     row[2]||"",
-    bilingual: row[3]||"",
-    title:     row[4]||"",
-    phone:     row[5]||"",
-    email:     row[6]||"",
-    address:   row[7]||"",
-    audExp:    row[9]||"",
-    nioshExp:  row[13]||"",
-    rating:    parseInt(row[18])||0,
-    notes:     row[19]||"",
-    flags:     row[20]||"",
-    services:  parseServices(row),
+    name:row[0]||"",region:row[1]||"",state:row[2]||"",bilingual:row[3]||"",
+    title:row[4]||"",phone:row[5]||"",email:row[6]||"",address:row[7]||"",
+    audExp:row[9]||"",nioshExp:row[13]||"",rating:parseInt(row[18])||0,
+    notes:row[19]||"",flags:row[20]||"",services:parseServices(row),
   };
 }
 
 async function loadData(){
   try{
-    const r = await fetch(SHEET_URL);
-    const d = await r.json();
+    const r=await fetch(SHEET_URL);
+    const d=await r.json();
     if(!d.values) return [];
-    return d.values.filter(r => r[0] && r[7]).map(techFromRow);
-  } catch(e){
-    console.error("Sheet load error:", e);
-    return [];
-  }
+    return d.values.filter(r=>r[0]).map(techFromRow);
+  }catch(e){ console.error(e); return []; }
 }
 
-function makePinSVG(rating){
-  const color = ratingColor(rating);
-  const textColor = (rating >= 6 && rating <= 7) ? "#555" : "#fff";
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="34" height="44" viewBox="0 0 34 44">
-    <path d="M17 1C8.163 1 1 8.163 1 17c0 11 16 26 16 26S33 28 33 17C33 8.163 25.837 1 17 1z" fill="${color}" stroke="#fff" stroke-width="2"/>
-    <text x="17" y="22" text-anchor="middle" font-size="12" font-weight="bold" fill="${textColor}" font-family="Arial">${rating}</text>
+function makePinSVG(tech){
+  const rm=isRM(tech), sdm=isSDM(tech), inactive=isInactive(tech);
+  const opacity=inactive?"0.45":"1";
+  if(rm||sdm){
+    const c=rm?"#2E86C1":"#A569BD";
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="46" height="46" viewBox="0 0 46 46" opacity="${opacity}">
+      <polygon points="23,2 28,18 45,18 32,29 37,45 23,34 9,45 14,29 1,18 18,18" fill="${c}" stroke="#fff" stroke-width="2"/>
+      <text x="23" y="28" text-anchor="middle" font-size="10" font-weight="bold" fill="#fff" font-family="Arial">${tech.rating}</text>
+    </svg>`;
+  }
+  const c=inactive?"#bbb":RATING_COLORS[tech.rating]||"#999";
+  const tc=(!inactive&&(tech.rating===6||tech.rating===7))?"#444":"#fff";
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="34" height="44" viewBox="0 0 34 44" opacity="${opacity}">
+    <path d="M17 1C8.163 1 1 8.163 1 17c0 11 16 26 16 26S33 28 33 17C33 8.163 25.837 1 17 1z" fill="${c}" stroke="#fff" stroke-width="2"/>
+    <text x="17" y="22" text-anchor="middle" font-size="12" font-weight="bold" fill="${tc}" font-family="Arial">${tech.rating}</text>
   </svg>`;
 }
 
 function makeMarker(tech){
-  const icon = {
-    url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(makePinSVG(tech.rating)),
-    scaledSize: new google.maps.Size(34, 44),
-    anchor: new google.maps.Point(17, 44),
+  const coords=COORDS[tech.name];
+  if(!coords) return null;
+  const large=isRM(tech)||isSDM(tech);
+  const icon={
+    url:'data:image/svg+xml;charset=UTF-8,'+encodeURIComponent(makePinSVG(tech)),
+    scaledSize:large?new google.maps.Size(46,46):new google.maps.Size(34,44),
+    anchor:large?new google.maps.Point(23,44):new google.maps.Point(17,44),
   };
-
-  const marker = new google.maps.Marker({
-    position: {lat:0, lng:0},
-    map: map,
-    icon: icon,
-    title: tech.name,
-    visible: false,
+  const marker=new google.maps.Marker({
+    position:coords, map, icon, title:tech.name,
+    zIndex:large?10:1, visible:false,
   });
 
-  const servicesBadges = tech.services.map(s=>`<span class="badge">${s}</span>`).join('');
-  const flagHtml = tech.flags ? `<div class="flag-box">&#9888; ${tech.flags}</div>` : '';
-  const bilingualBadge = tech.bilingual==="Yes" ? `<span class="badge" style="background:#E8F8E8;color:#1E6B1E">Bilingual</span>` : '';
+  const rc=isRM(tech)?"#2E86C1":isSDM(tech)?"#A569BD":"#1F3864";
+  const servicesBadges=tech.services.map(s=>`<span class="badge">${s}</span>`).join('');
+  const bilingualBadge=tech.bilingual==="Yes"?`<span class="badge" style="background:#E8F8E8;color:#1a6b1a">Bilingual</span>`:'';
+  const inactiveBadge=isInactive(tech)?`<span class="badge inactive-badge">On Leave</span>`:'';
+  const flagHtml=tech.flags?`<div style="background:#FFF9C4;border:1px solid #F4D03F;border-radius:4px;padding:5px 7px;font-size:11px;color:#7D6608;margin-top:6px">&#9888; ${tech.flags}</div>`:'';
 
-  const iwContent = `
-    <div style="font-family:Arial;font-size:12px;max-width:240px;line-height:1.5">
-      <div style="font-weight:700;font-size:14px;color:#1F3864;margin-bottom:4px">${tech.name}</div>
-      <div style="color:#555;margin-bottom:6px">${tech.title}${tech.region ? ' &middot; '+tech.region : ''}</div>
-      <div style="margin-bottom:6px">
-        <strong>Rating:</strong>
-        <span style="color:${ratingColor(tech.rating)};font-weight:700;font-size:14px"> ${tech.rating}/9</span>
-      </div>
-      ${tech.phone ? `<div style="margin-bottom:3px">&#128222; <a href="tel:${tech.phone}" style="color:#1F3864">${tech.phone}</a></div>` : ''}
-      ${tech.email ? `<div style="margin-bottom:6px;word-break:break-all">&#9993; <a href="mailto:${tech.email}" style="color:#1F3864">${tech.email}</a></div>` : ''}
-      ${tech.address ? `<div style="margin-bottom:6px;color:#555;font-size:11px">&#128205; ${tech.address}</div>` : ''}
-      <div style="margin-bottom:4px">${servicesBadges}${bilingualBadge}</div>
-      ${tech.audExp && tech.audExp !== "Active" ? `<div style="font-size:10px;color:#888;margin-top:4px">Audio cert exp: ${tech.audExp}</div>` : ''}
-      ${tech.nioshExp && tech.nioshExp !== "Active" ? `<div style="font-size:10px;color:#888">NIOSH cert exp: ${tech.nioshExp}</div>` : ''}
-      ${tech.notes ? `<div style="margin-top:6px;color:#555;font-size:11px;font-style:italic;border-top:1px solid #eee;padding-top:6px">&#128203; ${tech.notes}</div>` : ''}
+  const iw=new google.maps.InfoWindow({maxWidth:270,content:`
+    <div style="font-family:Arial;font-size:12px;max-width:250px;line-height:1.5">
+      <div style="font-weight:700;font-size:14px;color:${rc};margin-bottom:3px">${tech.name} ${inactiveBadge}</div>
+      <div style="color:#555;margin-bottom:5px">${tech.title}${tech.region?' &middot; '+tech.region:''}</div>
+      <div style="margin-bottom:5px"><strong>Rating:</strong> <span style="color:${RATING_COLORS[tech.rating]||'#999'};font-weight:700;font-size:14px">${tech.rating}/9</span></div>
+      ${tech.phone?`<div style="margin-bottom:2px">&#128222; <a href="tel:${tech.phone}" style="color:#1F3864">${tech.phone}</a></div>`:''}
+      ${tech.email?`<div style="margin-bottom:5px;word-break:break-all">&#9993; <a href="mailto:${tech.email}" style="color:#1F3864">${tech.email}</a></div>`:''}
+      ${tech.address?`<div style="margin-bottom:5px;color:#666;font-size:11px">&#128205; ${tech.address}</div>`:''}
+      <div>${servicesBadges}${bilingualBadge}</div>
+      ${tech.audExp&&tech.audExp!=="Active"?`<div style="font-size:10px;color:#888;margin-top:4px">Audio exp: ${tech.audExp}</div>`:''}
+      ${tech.nioshExp&&tech.nioshExp!=="Active"?`<div style="font-size:10px;color:#888">NIOSH exp: ${tech.nioshExp}</div>`:''}
+      ${tech.notes?`<div style="margin-top:6px;color:#555;font-size:11px;font-style:italic;border-top:1px solid #eee;padding-top:5px">&#128203; ${tech.notes}</div>`:''}
       ${flagHtml}
-    </div>`;
+    </div>`});
 
-  const iw = new google.maps.InfoWindow({ content: iwContent, maxWidth: 260 });
-
-  marker.addListener('click', ()=>{
+  marker.addListener('click',()=>{
     if(openInfoWindow) openInfoWindow.close();
-    iw.open(map, marker);
-    openInfoWindow = iw;
+    iw.open(map,marker);
+    openInfoWindow=iw;
   });
-
-  return { marker, tech, iw };
-}
-
-async function geocodeAll(techMarkers){
-  const delay = ms => new Promise(r => setTimeout(r, ms));
-  const total = techMarkers.length;
-  let done = 0;
-
-  for(let i = 0; i < techMarkers.length; i++){
-    const {marker, tech} = techMarkers[i];
-    await new Promise(resolve => {
-      geocoder.geocode({ address: tech.address }, (results, status) => {
-        if(status === 'OK'){
-          marker.setPosition(results[0].geometry.location);
-          marker.setVisible(true);
-        }
-        resolve();
-      });
-    });
-    done++;
-    const pct = Math.round((done/total)*100);
-    document.getElementById('progress-fill').style.width = pct + '%';
-    document.getElementById('loading-msg').textContent = `Placing pins... ${done} of ${total}`;
-    if(i % 4 === 3) await delay(250);
-  }
+  return {marker,tech};
 }
 
 function populateRegions(){
-  const regions = [...new Set(allTechs.map(t=>t.region).filter(Boolean))].sort();
-  const sel = document.getElementById('f-region');
-  regions.forEach(r=>{
-    const o = document.createElement('option');
-    o.value = r; o.textContent = r;
-    sel.appendChild(o);
-  });
+  const regions=[...new Set(allTechs.map(t=>t.region).filter(Boolean))].sort();
+  const sel=document.getElementById('f-region');
+  regions.forEach(r=>{const o=document.createElement('option');o.value=r;o.textContent=r;sel.appendChild(o);});
 }
 
 function applyFilters(){
-  const region    = document.getElementById('f-region').value;
-  const service   = document.getElementById('f-service').value;
-  const minRating = parseInt(document.getElementById('f-rating').value)||0;
-  const bilingual = document.getElementById('f-bilingual').value;
-  const search    = document.getElementById('search').value.toLowerCase().trim();
-
-  let visible = 0;
-  markers.forEach(({marker, tech})=>{
-    const show =
-      (!region    || tech.region === region) &&
-      (!service   || tech.services.includes(service)) &&
-      (tech.rating >= minRating) &&
-      (!bilingual || tech.bilingual === bilingual) &&
-      (!search    || tech.name.toLowerCase().includes(search));
+  const region=document.getElementById('f-region').value;
+  const service=document.getElementById('f-service').value;
+  const minRating=parseInt(document.getElementById('f-rating').value)||0;
+  const bilingual=document.getElementById('f-bilingual').value;
+  const search=document.getElementById('search').value.toLowerCase().trim();
+  const showInactive=document.getElementById('toggle-inactive').checked;
+  let visible=0;
+  markers.forEach(({marker,tech})=>{
+    const show=(showInactive||!isInactive(tech))&&
+      (!region||tech.region===region)&&
+      (!service||tech.services.includes(service))&&
+      (tech.rating>=minRating)&&
+      (!bilingual||tech.bilingual===bilingual)&&
+      (!search||tech.name.toLowerCase().includes(search));
     marker.setVisible(show);
     if(show) visible++;
   });
-  document.getElementById('count-badge').textContent = `${visible} tech${visible===1?'':'s'} shown`;
+  document.getElementById('count-badge').textContent=`${visible} shown`;
+}
+
+function haversine(lat1,lng1,lat2,lng2){
+  const R=3958.8,dLat=(lat2-lat1)*Math.PI/180,dLng=(lng2-lng1)*Math.PI/180;
+  const a=Math.sin(dLat/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
+  return Math.round(R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a)));
+}
+
+async function findNearest(){
+  const zip=document.getElementById('zip-input').value.trim();
+  if(!zip||zip.length<5) return;
+  try{
+    const r=await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(zip)}&key=${API_KEY}`);
+    const d=await r.json();
+    if(d.status!=='OK'){alert('Could not find that zip code.');return;}
+    const {lat,lng}=d.results[0].geometry.location;
+    const showInactive=document.getElementById('toggle-inactive').checked;
+    const ranked=markers
+      .filter(({tech})=>COORDS[tech.name]&&(showInactive||!isInactive(tech)))
+      .map(({tech})=>({...tech,dist:haversine(lat,lng,COORDS[tech.name].lat,COORDS[tech.name].lng)}))
+      .sort((a,b)=>a.dist-b.dist).slice(0,5);
+    document.getElementById('zip-title').textContent=`Nearest to ${zip}`;
+    document.getElementById('zip-results-body').innerHTML=ranked.map(t=>`
+      <div class="zip-row">
+        <span class="zip-name">${t.name}</span><span class="zip-dist">${t.dist} mi</span>
+        <div class="zip-detail">${t.title} &middot; Rating ${t.rating}/9 &middot; ${t.region}</div>
+        <div class="zip-detail">${t.phone||'No phone on file'}</div>
+        <div>${t.services.slice(0,4).map(s=>`<span class="badge">${s}</span>`).join('')}${t.services.length>4?`<span class="badge">+${t.services.length-4}</span>`:''}${isInactive(t)?`<span class="badge inactive-badge">On Leave</span>`:''}</div>
+      </div>`).join('');
+    document.getElementById('zip-results').style.display='block';
+    map.panTo({lat,lng});
+    map.setZoom(7);
+  }catch(e){alert('Error geocoding zip code.');}
 }
 
 async function initMap(){
-  map = new google.maps.Map(document.getElementById('map'), {
-    center: {lat: 37.5, lng: -95},
-    zoom: 4,
-    mapTypeControl: false,
-    streetViewControl: false,
-    fullscreenControl: true,
-    styles: [
-      {featureType:"poi",stylers:[{visibility:"off"}]},
-      {featureType:"transit",stylers:[{visibility:"off"}]}
-    ]
+  map=new google.maps.Map(document.getElementById('map'),{
+    center:{lat:37.5,lng:-95},zoom:4,
+    mapTypeControl:false,streetViewControl:false,fullscreenControl:true,
+    styles:[{featureType:"poi",stylers:[{visibility:"off"}]},{featureType:"transit",stylers:[{visibility:"off"}]}]
   });
-
-  geocoder = new google.maps.Geocoder();
-
-  document.getElementById('loading-msg').textContent = 'Fetching technician data...';
-  allTechs = await loadData();
-
-  if(allTechs.length === 0){
-    document.getElementById('loading-msg').textContent = 'Error: Could not load sheet data. Check sharing settings.';
-    return;
-  }
-
-  document.getElementById('loading-msg').textContent = `Loaded ${allTechs.length} technicians. Placing pins...`;
+  allTechs=await loadData();
+  if(!allTechs.length){document.getElementById('count-badge').textContent='Sheet error — check sharing settings';return;}
   populateRegions();
-
-  markers = allTechs.map(t => makeMarker(t));
-  await geocodeAll(markers);
-
-  document.getElementById('loading').style.display = 'none';
-  document.getElementById('count-badge').textContent = `${markers.length} techs shown`;
-
-  ['f-region','f-service','f-rating','f-bilingual'].forEach(id=>{
-    document.getElementById(id).addEventListener('change', applyFilters);
-  });
-  document.getElementById('search').addEventListener('input', applyFilters);
-
-  map.addListener('click', ()=>{
-    if(openInfoWindow){ openInfoWindow.close(); openInfoWindow=null; }
-  });
+  markers=allTechs.map(makeMarker).filter(Boolean);
+  applyFilters();
+  ['f-region','f-service','f-rating','f-bilingual'].forEach(id=>document.getElementById(id).addEventListener('change',applyFilters));
+  document.getElementById('search').addEventListener('input',applyFilters);
+  document.getElementById('toggle-inactive').addEventListener('change',applyFilters);
+  document.getElementById('zip-btn').addEventListener('click',findNearest);
+  document.getElementById('zip-input').addEventListener('keydown',e=>{if(e.key==='Enter')findNearest();});
+  document.getElementById('zip-close').addEventListener('click',()=>{document.getElementById('zip-results').style.display='none';});
+  map.addListener('click',()=>{if(openInfoWindow){openInfoWindow.close();openInfoWindow=null;}});
 }
-
-window.initMap = initMap;
+window.initMap=initMap;
 </script>
-
-<script async defer
-  src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDYd59Nq9q2ZA26IQdP0d_2N88HTIiMG1M&callback=initMap">
-</script>
+<script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCXalP4vszPKPOVN9Y5pzNbfjJjF4VN7VY&callback=initMap"></script>
 </body>
 </html>

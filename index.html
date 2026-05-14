@@ -88,10 +88,10 @@ input:checked+.slider:before{transform:translateX(16px)}
       <label>Min rating</label>
       <select id="f-rating">
         <option value="0">Any</option>
+        <option value="4">4+</option>
+        <option value="5">5+</option>
         <option value="6">6+</option>
-        <option value="7">7+</option>
-        <option value="8">8+</option>
-        <option value="9">9 only</option>
+        <option value="7">7 only</option>
       </select>
     </div>
     <div class="filter-group">
@@ -124,11 +124,10 @@ input:checked+.slider:before{transform:translateX(16px)}
       <div class="legend-item"><div class="legend-dot" style="background:#888"></div><span>Safety Responder</span></div>
       <div class="legend-div"></div>
       <h4>Responder Rating</h4>
-      <div class="legend-item"><div class="legend-dot" style="background:#1E8449"></div><span>9 &mdash; Full capability</span></div>
-      <div class="legend-item"><div class="legend-dot" style="background:#27AE60"></div><span>8 &mdash; Near-full</span></div>
-      <div class="legend-item"><div class="legend-dot" style="background:#82E0AA"></div><span>7 &mdash; Strong</span></div>
-      <div class="legend-item"><div class="legend-dot" style="background:#F4D03F"></div><span>6 &mdash; Mid-tier</span></div>
-      <div class="legend-item"><div class="legend-dot" style="background:#F0B27A"></div><span>4&ndash;5 &mdash; Basic+</span></div>
+      <div class="legend-item"><div class="legend-dot" style="background:#1E8449"></div><span>7 &mdash; Full capacity</span></div>
+      <div class="legend-item"><div class="legend-dot" style="background:#27AE60"></div><span>6 &mdash; Near-full</span></div>
+      <div class="legend-item"><div class="legend-dot" style="background:#F4D03F"></div><span>5 &mdash; Mid-tier</span></div>
+      <div class="legend-item"><div class="legend-dot" style="background:#E67E22"></div><span>4 &mdash; Basic</span></div>
       <div class="legend-item"><div class="legend-dot" style="background:#E74C3C"></div><span>3 &mdash; Audio/Fit only</span></div>
     </div>
     <div id="zip-results">
@@ -144,7 +143,7 @@ input:checked+.slider:before{transform:translateX(16px)}
 const API_KEY  = "AIzaSyCXalP4vszPKPOVN9Y5pzNbfjJjF4VN7VY";
 const SHEET_ID = "14VbFR3dKRCb2LoalZQxTYMSN8g_IXhmCDQci3112D50";
 const SHEET_URL = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/MASTER!A3:U200?key=${API_KEY}`;
-const RATING_COLORS = {9:"#1E8449",8:"#27AE60",7:"#82E0AA",6:"#F4D03F",5:"#F39C12",4:"#F0B27A",3:"#E74C3C"};
+const RATING_COLORS = {7:"#1E8449",6:"#27AE60",5:"#F4D03F",4:"#E67E22",3:"#E74C3C"};
 const COORDS = {
   "Allison, Terri":    {lat:29.5572,lng:-95.7835},
   "Appleby, Brian":    {lat:40.7282,lng:-73.3271},
@@ -230,7 +229,7 @@ function makePinSVG(tech){
     </svg>`;
   }
   const c=inactive?"#bbb":RATING_COLORS[tech.rating]||"#999";
-  const tc=(!inactive&&(tech.rating===6||tech.rating===7))?"#444":"#fff";
+  const tc=(!inactive&&tech.rating===5)?"#444":"#fff";
   return `<svg xmlns="http://www.w3.org/2000/svg" width="34" height="44" viewBox="0 0 34 44" opacity="${opacity}">
     <path d="M17 1C8.163 1 1 8.163 1 17c0 11 16 26 16 26S33 28 33 17C33 8.163 25.837 1 17 1z" fill="${c}" stroke="#fff" stroke-width="2"/>
     <text x="17" y="22" text-anchor="middle" font-size="12" font-weight="bold" fill="${tc}" font-family="Arial">${tech.rating}</text>
@@ -270,7 +269,7 @@ function makeMarker(tech){
     <div style="font-family:Arial;font-size:12px;max-width:250px;line-height:1.5">
       <div style="font-weight:700;font-size:14px;color:${rc};margin-bottom:3px">${tech.name} ${inactiveBadge}</div>
       <div style="color:#555;margin-bottom:5px">${tech.title}${tech.region?' &middot; '+tech.region:''}</div>
-      <div style="margin-bottom:5px"><strong>Rating:</strong> <span style="color:${RATING_COLORS[tech.rating]||'#999'};font-weight:700;font-size:14px">${tech.rating}/9</span></div>
+      <div style="margin-bottom:5px"><strong>Rating:</strong> <span style="color:${RATING_COLORS[tech.rating]||'#999'};font-weight:700;font-size:14px">${tech.rating}/7</span></div>
       ${tech.phone?`<div style="margin-bottom:2px">&#128222; <a href="tel:${tech.phone}" style="color:#1F3864">${tech.phone}</a></div>`:''}
       ${tech.email?`<div style="margin-bottom:5px;word-break:break-all">&#9993; <a href="mailto:${tech.email}" style="color:#1F3864">${tech.email}</a></div>`:''}
       ${tech.address?`<div style="margin-bottom:5px;color:#666;font-size:11px">&#128205; ${tech.address}</div>`:''}
@@ -397,12 +396,13 @@ async function findNearest(){
     });
 
     const showInactive=document.getElementById('toggle-inactive').checked;
-    // Exclude Regional Managers and Service Delivery Managers from the nearest list
+    const service=document.getElementById('f-service').value;
+    // Exclude Regional Managers and Service Delivery Managers; respect Service filter if set
     const ranked=markers
-      .filter(({tech})=>COORDS[tech.name]&&(showInactive||!isInactive(tech))&&!isRM(tech)&&!isSDM(tech))
+      .filter(({tech})=>COORDS[tech.name]&&(showInactive||!isInactive(tech))&&!isRM(tech)&&!isSDM(tech)&&(!service||tech.services.includes(service)))
       .map(({tech})=>({...tech,dist:haversine(lat,lng,COORDS[tech.name].lat,COORDS[tech.name].lng)}))
       .sort((a,b)=>a.dist-b.dist).slice(0,5);
-    document.getElementById('zip-title').textContent=`Nearest to ${zip}`;
+    document.getElementById('zip-title').textContent=service?`Nearest ${service} to ${zip}`:`Nearest to ${zip}`;
     const escHtml=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     document.getElementById('zip-results-body').innerHTML=ranked.map(t=>{
       const hasInfo=!!(t.notes||t.flags);
@@ -414,7 +414,7 @@ async function findNearest(){
       return `
       <div class="zip-row">
         <span class="${cls}">${t.name}${tooltip}</span><span class="zip-dist">${t.dist} mi</span>
-        <div class="zip-detail">${t.title} &middot; Rating ${t.rating}/9 &middot; ${t.region}</div>
+        <div class="zip-detail">${t.title} &middot; Rating ${t.rating}/7 &middot; ${t.region}</div>
         <div class="zip-detail">${t.phone||'No phone on file'}</div>
         <div>${t.services.slice(0,4).map(s=>`<span class="badge">${s}</span>`).join('')}${t.services.length>4?`<span class="badge">+${t.services.length-4}</span>`:''}${isInactive(t)?`<span class="badge inactive-badge">On Leave</span>`:''}</div>
       </div>`;}).join('');

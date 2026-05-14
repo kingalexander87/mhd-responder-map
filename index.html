@@ -41,7 +41,10 @@ input:checked+.slider:before{transform:translateX(16px)}
 #zip-results-body{padding:10px 14px}
 .zip-row{padding:8px 0;border-bottom:1px solid #f0f0f0;font-size:12px}
 .zip-row:last-child{border-bottom:none}
-.zip-name{font-weight:700;color:#1F3864;font-size:13px}
+.zip-name{font-weight:700;color:#1F3864;font-size:13px;position:relative;display:inline-block}
+.zip-name[data-notes]{cursor:help;border-bottom:1px dotted #888}
+.zip-name[data-notes]:hover::after{content:attr(data-notes);position:absolute;left:0;top:calc(100% + 6px);background:#1F3864;color:#fff;padding:7px 10px;border-radius:5px;font-size:11px;font-weight:400;white-space:normal;width:240px;z-index:100;box-shadow:0 3px 10px rgba(0,0,0,0.25);line-height:1.4;pointer-events:none}
+.zip-name[data-notes]:hover::before{content:"";position:absolute;left:14px;top:100%;border:6px solid transparent;border-bottom-color:#1F3864;z-index:100;pointer-events:none}
 .zip-dist{color:#27AE60;font-weight:700;float:right}
 .zip-detail{color:#666;margin-top:2px}
 .badge{display:inline-block;padding:2px 6px;border-radius:10px;font-size:10px;font-weight:700;margin:1px;background:#E8F4FD;color:#1F3864}
@@ -100,10 +103,8 @@ input:checked+.slider:before{transform:translateX(16px)}
     </div>
     <span id="count-badge">Loading...</span>
   </div>
-
   <div id="map-container">
     <div id="map"></div>
-
     <div id="legend">
       <h4>Role</h4>
       <div class="legend-item"><span class="legend-star" style="color:#2E86C1">&#11088;</span><span style="color:#2E86C1;font-weight:700">Regional Manager</span></div>
@@ -118,7 +119,6 @@ input:checked+.slider:before{transform:translateX(16px)}
       <div class="legend-item"><div class="legend-dot" style="background:#F0B27A"></div><span>4&ndash;5 &mdash; Basic+</span></div>
       <div class="legend-item"><div class="legend-dot" style="background:#E74C3C"></div><span>3 &mdash; Audio/Fit only</span></div>
     </div>
-
     <div id="zip-results">
       <div id="zip-results-header">
         <span id="zip-title">Nearest Responders</span>
@@ -128,14 +128,11 @@ input:checked+.slider:before{transform:translateX(16px)}
     </div>
   </div>
 </div>
-
 <script>
 const API_KEY  = "AIzaSyCXalP4vszPKPOVN9Y5pzNbfjJjF4VN7VY";
 const SHEET_ID = "14VbFR3dKRCb2LoalZQxTYMSN8g_IXhmCDQci3112D50";
 const SHEET_URL = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/MASTER!A3:U200?key=${API_KEY}`;
-
 const RATING_COLORS = {9:"#1E8449",8:"#27AE60",7:"#82E0AA",6:"#F4D03F",5:"#F39C12",4:"#F0B27A",3:"#E74C3C"};
-
 const COORDS = {
   "Allison, Terri":    {lat:29.5572,lng:-95.7835},
   "Appleby, Brian":    {lat:40.7282,lng:-73.3271},
@@ -178,13 +175,10 @@ const COORDS = {
   "Werner, Thomas":    {lat:31.7093,lng:-99.0018},
   "Whicker, Steven":   {lat:39.7084,lng:-86.3027},
 };
-
-let map, allTechs=[], markers=[], openInfoWindow=null;
-
+let map, allTechs=[], markers=[], openInfoWindow=null, searchMarker=null, searchInfoWindow=null;
 function isInactive(t){ return t.notes&&t.notes.toLowerCase().includes("on leave"); }
 function isRM(t){ return t.title&&t.title.toLowerCase().includes("regional manager"); }
 function isSDM(t){ return t.title&&t.title.toLowerCase().includes("service delivery"); }
-
 function parseServices(row){
   const s=[];
   if(row[8]==="Yes") s.push("Audio");
@@ -197,7 +191,6 @@ function parseServices(row){
   if(row[17]==="Yes") s.push("ENLS");
   return s;
 }
-
 function techFromRow(row){
   return {
     name:row[0]||"",region:row[1]||"",state:row[2]||"",bilingual:row[3]||"",
@@ -206,7 +199,6 @@ function techFromRow(row){
     notes:row[19]||"",flags:row[20]||"",services:parseServices(row),
   };
 }
-
 async function loadData(){
   try{
     const r=await fetch(SHEET_URL);
@@ -215,7 +207,6 @@ async function loadData(){
     return d.values.filter(r=>r[0]).map(techFromRow);
   }catch(e){ console.error(e); return []; }
 }
-
 function makePinSVG(tech){
   const rm=isRM(tech), sdm=isSDM(tech), inactive=isInactive(tech);
   const opacity=inactive?"0.45":"1";
@@ -233,7 +224,18 @@ function makePinSVG(tech){
     <text x="17" y="22" text-anchor="middle" font-size="12" font-weight="bold" fill="${tc}" font-family="Arial">${tech.rating}</text>
   </svg>`;
 }
-
+function makeSearchPinSVG(){
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="42" height="54" viewBox="0 0 42 54">
+    <defs>
+      <filter id="ds" x="-20%" y="-20%" width="140%" height="140%">
+        <feDropShadow dx="0" dy="2" stdDeviation="1.5" flood-opacity="0.4"/>
+      </filter>
+    </defs>
+    <path d="M21 1C10.51 1 2 9.51 2 20c0 13.5 19 33 19 33s19-19.5 19-33C40 9.51 31.49 1 21 1z" fill="#E74C3C" stroke="#fff" stroke-width="2.5" filter="url(#ds)"/>
+    <circle cx="21" cy="20" r="7" fill="#fff"/>
+    <circle cx="21" cy="20" r="3.5" fill="#E74C3C"/>
+  </svg>`;
+}
 function makeMarker(tech){
   const coords=COORDS[tech.name];
   if(!coords) return null;
@@ -247,13 +249,11 @@ function makeMarker(tech){
     position:coords, map, icon, title:tech.name,
     zIndex:large?10:1, visible:false,
   });
-
   const rc=isRM(tech)?"#2E86C1":isSDM(tech)?"#A569BD":"#1F3864";
   const servicesBadges=tech.services.map(s=>`<span class="badge">${s}</span>`).join('');
   const bilingualBadge=tech.bilingual==="Yes"?`<span class="badge" style="background:#E8F8E8;color:#1a6b1a">Bilingual</span>`:'';
   const inactiveBadge=isInactive(tech)?`<span class="badge inactive-badge">On Leave</span>`:'';
   const flagHtml=tech.flags?`<div style="background:#FFF9C4;border:1px solid #F4D03F;border-radius:4px;padding:5px 7px;font-size:11px;color:#7D6608;margin-top:6px">&#9888; ${tech.flags}</div>`:'';
-
   const iw=new google.maps.InfoWindow({maxWidth:270,content:`
     <div style="font-family:Arial;font-size:12px;max-width:250px;line-height:1.5">
       <div style="font-weight:700;font-size:14px;color:${rc};margin-bottom:3px">${tech.name} ${inactiveBadge}</div>
@@ -268,7 +268,6 @@ function makeMarker(tech){
       ${tech.notes?`<div style="margin-top:6px;color:#555;font-size:11px;font-style:italic;border-top:1px solid #eee;padding-top:5px">&#128203; ${tech.notes}</div>`:''}
       ${flagHtml}
     </div>`});
-
   marker.addListener('click',()=>{
     if(openInfoWindow) openInfoWindow.close();
     iw.open(map,marker);
@@ -276,13 +275,11 @@ function makeMarker(tech){
   });
   return {marker,tech};
 }
-
 function populateRegions(){
   const regions=[...new Set(allTechs.map(t=>t.region).filter(Boolean))].sort();
   const sel=document.getElementById('f-region');
   regions.forEach(r=>{const o=document.createElement('option');o.value=r;o.textContent=r;sel.appendChild(o);});
 }
-
 function applyFilters(){
   const region=document.getElementById('f-region').value;
   const service=document.getElementById('f-service').value;
@@ -303,41 +300,76 @@ function applyFilters(){
   });
   document.getElementById('count-badge').textContent=`${visible} shown`;
 }
-
 function haversine(lat1,lng1,lat2,lng2){
   const R=3958.8,dLat=(lat2-lat1)*Math.PI/180,dLng=(lng2-lng1)*Math.PI/180;
   const a=Math.sin(dLat/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
   return Math.round(R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a)));
 }
-
+function clearSearchMarker(){
+  if(searchMarker){ searchMarker.setMap(null); searchMarker=null; }
+  if(searchInfoWindow){ searchInfoWindow.close(); searchInfoWindow=null; }
+}
 async function findNearest(){
   const zip=document.getElementById('zip-input').value.trim();
   if(!zip||zip.length<5) return;
   try{
-const r=await fetch(`https://api.zippopotam.us/us/${zip}`);
-if(!r.ok){alert('Could not find that zip code.');return;}
-const d=await r.json();
-const lat=parseFloat(d.places[0].latitude);
-const lng=parseFloat(d.places[0].longitude);
+    const r=await fetch(`https://api.zippopotam.us/us/${zip}`);
+    if(!r.ok){alert('Could not find that zip code.');return;}
+    const d=await r.json();
+    const lat=parseFloat(d.places[0].latitude);
+    const lng=parseFloat(d.places[0].longitude);
+    const placeName=d.places[0]['place name']||'';
+    const stateAbbr=d.places[0]['state abbreviation']||'';
+    const locLabel=placeName?`${placeName}, ${stateAbbr}`:zip;
+
+    // Drop a pin at the exact searched zip code location
+    clearSearchMarker();
+    searchMarker=new google.maps.Marker({
+      position:{lat,lng},
+      map,
+      icon:{
+        url:'data:image/svg+xml;charset=UTF-8,'+encodeURIComponent(makeSearchPinSVG()),
+        scaledSize:new google.maps.Size(42,54),
+        anchor:new google.maps.Point(21,54),
+      },
+      title:`Searched: ${zip} (${locLabel})`,
+      zIndex:9999,
+      animation:google.maps.Animation.DROP,
+    });
+    searchInfoWindow=new google.maps.InfoWindow({content:`
+      <div style="font-family:Arial;font-size:12px;line-height:1.5">
+        <div style="font-weight:700;font-size:13px;color:#E74C3C;margin-bottom:2px">&#128205; Searched Location</div>
+        <div style="color:#333"><strong>${zip}</strong></div>
+        <div style="color:#666">${locLabel}</div>
+      </div>`});
+    searchMarker.addListener('click',()=>{
+      if(openInfoWindow) openInfoWindow.close();
+      searchInfoWindow.open(map,searchMarker);
+      openInfoWindow=searchInfoWindow;
+    });
+
     const showInactive=document.getElementById('toggle-inactive').checked;
+    // Exclude Regional Managers and Service Delivery Managers from the nearest list
     const ranked=markers
-      .filter(({tech})=>COORDS[tech.name]&&(showInactive||!isInactive(tech)))
+      .filter(({tech})=>COORDS[tech.name]&&(showInactive||!isInactive(tech))&&!isRM(tech)&&!isSDM(tech))
       .map(({tech})=>({...tech,dist:haversine(lat,lng,COORDS[tech.name].lat,COORDS[tech.name].lng)}))
       .sort((a,b)=>a.dist-b.dist).slice(0,5);
     document.getElementById('zip-title').textContent=`Nearest to ${zip}`;
-    document.getElementById('zip-results-body').innerHTML=ranked.map(t=>`
+    const escAttr=s=>String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    document.getElementById('zip-results-body').innerHTML=ranked.map(t=>{
+      const noteAttr=t.notes?` data-notes="${escAttr(t.notes)}"`:'';
+      return `
       <div class="zip-row">
-        <span class="zip-name">${t.name}</span><span class="zip-dist">${t.dist} mi</span>
+        <span class="zip-name"${noteAttr}>${t.name}</span><span class="zip-dist">${t.dist} mi</span>
         <div class="zip-detail">${t.title} &middot; Rating ${t.rating}/9 &middot; ${t.region}</div>
         <div class="zip-detail">${t.phone||'No phone on file'}</div>
         <div>${t.services.slice(0,4).map(s=>`<span class="badge">${s}</span>`).join('')}${t.services.length>4?`<span class="badge">+${t.services.length-4}</span>`:''}${isInactive(t)?`<span class="badge inactive-badge">On Leave</span>`:''}</div>
-      </div>`).join('');
+      </div>`;}).join('');
     document.getElementById('zip-results').style.display='block';
     map.panTo({lat,lng});
     map.setZoom(7);
   }catch(e){alert('Error geocoding zip code.');}
 }
-
 async function initMap(){
   map=new google.maps.Map(document.getElementById('map'),{
     center:{lat:37.5,lng:-95},zoom:4,
@@ -354,7 +386,10 @@ async function initMap(){
   document.getElementById('toggle-inactive').addEventListener('change',applyFilters);
   document.getElementById('zip-btn').addEventListener('click',findNearest);
   document.getElementById('zip-input').addEventListener('keydown',e=>{if(e.key==='Enter')findNearest();});
-  document.getElementById('zip-close').addEventListener('click',()=>{document.getElementById('zip-results').style.display='none';});
+  document.getElementById('zip-close').addEventListener('click',()=>{
+    document.getElementById('zip-results').style.display='none';
+    clearSearchMarker();
+  });
   map.addListener('click',()=>{if(openInfoWindow){openInfoWindow.close();openInfoWindow=null;}});
 }
 window.initMap=initMap;
@@ -364,4 +399,3 @@ window.initMap=initMap;
 </script>
 </body>
 </html>
-

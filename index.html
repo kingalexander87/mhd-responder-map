@@ -1,464 +1,396 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>MHD Safety Responder Map</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MHD Work Order Heat Map — 120 Days</title>
+
+<!-- Leaflet core -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<!-- Heatmap plugin -->
+<script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+<!-- PapaParse for robust CSV parsing -->
+<script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
+
 <style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:Arial,sans-serif;font-size:13px;overflow:hidden}
-#app{display:flex;flex-direction:column;height:100vh}
-#toolbar{background:#1F3864;color:#fff;padding:8px 12px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;z-index:10}
-#toolbar h1{font-size:14px;font-weight:700;margin-right:6px;white-space:nowrap}
-.filter-group{display:flex;align-items:center;gap:4px}
-.filter-group label{font-size:11px;opacity:.8;white-space:nowrap}
-select,input[type=text]{font-size:12px;padding:4px 7px;border-radius:4px;border:none;background:#2F5496;color:#fff;cursor:pointer}
-select option{background:#1F3864}
-input[type=text]{background:#2F5496;color:#fff}
-input[type=text]::placeholder{color:rgba(255,255,255,0.5)}
-#zip-input{width:110px}
-#zip-btn{background:#27AE60;color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:700}
-#zip-btn:hover{background:#1E8449}
-.toggle-wrap{display:flex;align-items:center;gap:5px;font-size:11px;opacity:.9}
-.toggle{position:relative;width:34px;height:18px}
-.toggle input{opacity:0;width:0;height:0}
-.slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#2F5496;border-radius:18px;transition:.3s}
-.slider:before{position:absolute;content:"";height:12px;width:12px;left:3px;bottom:3px;background:white;border-radius:50%;transition:.3s}
-input:checked+.slider{background:#27AE60}
-input:checked+.slider:before{transform:translateX(16px)}
-#count-badge{background:rgba(255,255,255,0.15);border-radius:12px;padding:2px 10px;font-size:11px;white-space:nowrap;margin-left:auto}
-#map-container{flex:1;position:relative}
-#map{width:100%;height:100%}
-#legend{position:absolute;bottom:28px;left:10px;background:rgba(255,255,255,0.96);border-radius:8px;padding:10px 12px;font-size:11px;z-index:5;box-shadow:0 2px 8px rgba(0,0,0,0.15);min-width:175px}
-#legend h4{font-size:11px;font-weight:700;margin-bottom:5px;color:#1F3864}
-.legend-item{display:flex;align-items:center;gap:6px;margin-bottom:3px}
-.legend-dot{width:12px;height:12px;border-radius:50%;flex-shrink:0}
-.legend-star{width:14px;height:14px;flex-shrink:0;font-size:14px;line-height:1}
-.legend-div{border-top:1px solid #ddd;margin:5px 0}
-#zip-results{position:absolute;top:10px;left:50%;transform:translateX(-50%);background:#fff;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.2);z-index:10;min-width:300px;max-width:360px;display:none}
-#zip-results-header{background:#1F3864;color:#fff;padding:10px 14px;border-radius:8px 8px 0 0;display:flex;justify-content:space-between;align-items:center;font-size:13px;font-weight:700}
-#zip-close{cursor:pointer;font-size:18px;line-height:1}
-#zip-results-body{padding:10px 14px}
-.zip-row{padding:8px 0;border-bottom:1px solid #f0f0f0;font-size:12px}
-.zip-row:last-child{border-bottom:none}
-.zip-name{font-weight:700;color:#1F3864;font-size:13px;position:relative;display:inline-block}
-.zip-name.has-info{cursor:help;border-bottom:1px dotted #888}
-.zip-tooltip{display:none;position:absolute;left:0;top:calc(100% + 8px);background:#1F3864;color:#fff;padding:8px 11px;border-radius:5px;font-size:11px;font-weight:400;white-space:normal;width:260px;z-index:200;box-shadow:0 3px 12px rgba(0,0,0,0.3);line-height:1.45;pointer-events:none}
-.zip-name.has-info:hover .zip-tooltip{display:block}
-.zip-tooltip:before{content:"";position:absolute;left:14px;bottom:100%;border:6px solid transparent;border-bottom-color:#1F3864}
-.zip-tooltip-label{display:block;color:#FFD700;font-weight:700;font-size:9px;letter-spacing:0.6px;margin-bottom:2px}
-.zip-tooltip-flag{margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.25)}
-.zip-dist{color:#27AE60;font-weight:700;float:right}
-.zip-detail{color:#666;margin-top:2px}
-.badge{display:inline-block;padding:2px 6px;border-radius:10px;font-size:10px;font-weight:700;margin:1px;background:#E8F4FD;color:#1F3864}
-.inactive-badge{background:#f0f0f0;color:#999}
-.search-wrap{position:relative}
-#name-dropdown{position:absolute;top:calc(100% + 3px);left:0;background:#fff;border-radius:5px;box-shadow:0 4px 14px rgba(0,0,0,0.28);min-width:240px;max-height:300px;overflow-y:auto;z-index:50;display:none}
-.dd-item{padding:7px 11px;cursor:pointer;color:#1F3864;font-size:12px;border-bottom:1px solid #f0f0f0}
-.dd-item:last-child{border-bottom:none}
-.dd-item:hover,.dd-item.active{background:#E8F4FD}
-.dd-name{font-weight:700;color:#1F3864;font-size:12px}
-.dd-detail{color:#666;font-size:10px;margin-top:1px}
-.dd-empty{padding:10px 11px;color:#999;font-size:11px;font-style:italic}
+:root {
+  --bg: #fafafa;
+  --panel: #ffffff;
+  --border: #e5e5e5;
+  --text: #1a1a1a;
+  --muted: #666;
+  --accent: #b81d13;
+  --responder: #2461c8;
+  --lead: #d97706;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: var(--text); background: var(--bg); }
+header { padding: 12px 16px; background: var(--panel); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
+header h1 { margin: 0; font-size: 17px; font-weight: 600; }
+header .meta { font-size: 12px; color: var(--muted); }
+.controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 12px; }
+.controls label { display: flex; align-items: center; gap: 4px; color: #333; }
+.controls select { font-size: 12px; padding: 3px 6px; border: 1px solid #d0d0d0; border-radius: 4px; background: #fff; }
+.controls button { font-size: 12px; padding: 4px 10px; border: 1px solid #d0d0d0; background: #fff; border-radius: 4px; cursor: pointer; }
+.controls button:hover { background: #f3f3f3; }
+.layout { display: grid; grid-template-columns: 1fr 300px; height: calc(100vh - 56px); }
+#map { width: 100%; height: 100%; }
+aside { background: var(--panel); border-left: 1px solid var(--border); padding: 14px 14px 60px; overflow-y: auto; font-size: 13px; }
+aside h3 { margin: 0 0 6px; font-size: 12px; font-weight: 600; color: #333; text-transform: uppercase; letter-spacing: 0.04em; }
+aside .panel { padding-bottom: 14px; margin-bottom: 14px; border-bottom: 1px solid #f0f0f0; }
+aside .panel:last-child { border-bottom: none; }
+.kv { display: flex; justify-content: space-between; padding: 2px 0; }
+.kv b { font-weight: 600; }
+.row { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px dotted #eee; }
+.row:last-child { border-bottom: none; }
+.count { font-weight: 600; color: var(--accent); min-width: 26px; text-align: right; }
+.where { flex: 1; padding-left: 8px; color: #333; }
+.gap-note { color: var(--muted); font-size: 11px; padding-top: 4px; font-style: italic; }
+.legend { display: flex; gap: 14px; font-size: 12px; align-items: center; }
+.legend-item { display: flex; align-items: center; gap: 5px; }
+.legend-swatch { width: 14px; height: 14px; border-radius: 50%; }
+.legend-swatch.wo { background: linear-gradient(135deg, rgba(255,200,0,0.7), rgba(184,29,19,0.9)); }
+.legend-swatch.resp { background: var(--responder); border-radius: 3px; }
+.legend-swatch.lead { background: var(--lead); border-radius: 3px; }
+.status { font-size: 11px; color: var(--muted); padding: 8px 16px; background: var(--panel); border-top: 1px solid var(--border); }
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  aside { border-left: none; border-top: 1px solid var(--border); max-height: 50vh; }
+  #map { height: 50vh; }
+}
+.resp-marker { background: var(--responder); border: 2px solid #fff; border-radius: 3px; box-shadow: 0 0 0 1px rgba(0,0,0,0.2); }
+.resp-marker.lead { background: var(--lead); }
+.resp-marker.inactive { background: #999; }
+.leaflet-popup-content { font-size: 13px; line-height: 1.45; }
+.leaflet-popup-content h4 { margin: 0 0 4px; font-size: 13px; }
+.leaflet-popup-content .sub { color: var(--muted); font-size: 11px; }
+.leaflet-popup-content ul { margin: 4px 0 0; padding-left: 16px; }
 </style>
 </head>
 <body>
-<div id="app">
-  <div id="toolbar">
-    <h1>&#x1F5FA; MHD Safety Responder Map</h1>
-    <div class="filter-group">
-      <label>Region</label>
-      <select id="f-region"><option value="">All</option></select>
-    </div>
-    <div class="filter-group">
-      <label>Service</label>
-      <select id="f-service">
-        <option value="">All</option>
-        <option value="Audio">Audio</option>
-        <option value="QN Fit">QN Fit</option>
-        <option value="QL Fit">QL Fit</option>
-        <option value="PFT">PFT</option>
-        <option value="Air Monitor">Air Monitor</option>
-        <option value="Dosimetry">Dosimetry</option>
-        <option value="NLS">NLS</option>
-        <option value="ENLS">ENLS</option>
-      </select>
-    </div>
-    <div class="filter-group">
-      <label>Min rating</label>
-      <select id="f-rating">
-        <option value="0">Any</option>
-        <option value="4">4+</option>
-        <option value="5">5+</option>
-        <option value="6">6+</option>
-        <option value="7">7 only</option>
-      </select>
-    </div>
-    <div class="filter-group">
-      <label>Bilingual</label>
-      <select id="f-bilingual">
-        <option value="">All</option>
-        <option value="Yes">Yes</option>
-      </select>
-    </div>
-    <div class="filter-group search-wrap">
-      <input type="text" id="search" placeholder="Search name..." autocomplete="off">
-      <div id="name-dropdown"></div>
-    </div>
-    <div class="toggle-wrap">
-      <label class="toggle"><input type="checkbox" id="toggle-inactive"><span class="slider"></span></label>
-      <span>Show inactive</span>
-    </div>
-    <div class="filter-group">
-      <input type="text" id="zip-input" placeholder="Zip code...">
-      <button id="zip-btn">Find Nearest</button>
-    </div>
-    <span id="count-badge">Loading...</span>
+
+<header>
+  <div>
+    <h1>MHD Work Order Heat Map — Next 120 Days</h1>
+    <div class="meta" id="meta">Loading…</div>
   </div>
-  <div id="map-container">
-    <div id="map"></div>
-    <div id="legend">
-      <h4>Role</h4>
-      <div class="legend-item"><span class="legend-star" style="color:#2E86C1">&#11088;</span><span style="color:#2E86C1;font-weight:700">Regional Manager</span></div>
-      <div class="legend-item"><span class="legend-star" style="color:#A569BD">&#11088;</span><span style="color:#A569BD;font-weight:700">Service Delivery Mgr</span></div>
-      <div class="legend-item"><div class="legend-dot" style="background:#888"></div><span>Safety Responder</span></div>
-      <div class="legend-div"></div>
-      <h4>Responder Rating</h4>
-      <div class="legend-item"><div class="legend-dot" style="background:#1E8449"></div><span>7 &mdash; Full capacity</span></div>
-      <div class="legend-item"><div class="legend-dot" style="background:#27AE60"></div><span>6 &mdash; Near-full</span></div>
-      <div class="legend-item"><div class="legend-dot" style="background:#F4D03F"></div><span>5 &mdash; Mid-tier</span></div>
-      <div class="legend-item"><div class="legend-dot" style="background:#E67E22"></div><span>4 &mdash; Basic</span></div>
-      <div class="legend-item"><div class="legend-dot" style="background:#E74C3C"></div><span>3 &mdash; Audio/Fit only</span></div>
-    </div>
-    <div id="zip-results">
-      <div id="zip-results-header">
-        <span id="zip-title">Nearest Responders</span>
-        <span id="zip-close">&#x2715;</span>
+  <div class="legend">
+    <div class="legend-item"><span class="legend-swatch wo"></span> WO density</div>
+    <div class="legend-item"><span class="legend-swatch resp"></span> Responder</div>
+    <div class="legend-item"><span class="legend-swatch lead"></span> Lead / Mgr</div>
+  </div>
+</header>
+
+<div class="layout">
+  <div id="map"></div>
+  <aside>
+    <div class="panel">
+      <h3>Filters</h3>
+      <div class="controls" style="flex-direction:column;align-items:stretch;gap:6px;">
+        <label>Service <select id="filter-service" style="margin-left:auto;"><option value="">All</option><option>Audio</option><option>ResFit</option><option>MEQ</option><option>Air</option><option>NLS</option><option>ENLS</option><option>Dosimetry</option></select></label>
+        <label>Responder region <select id="filter-region" style="margin-left:auto;"><option value="">All</option><option value="NE">NE</option><option value="SE">SE</option><option value="W">W</option><option value="C">C</option></select></label>
+        <label>Min responder rating <select id="filter-rating" style="margin-left:auto;"><option value="0">Any</option><option value="6">6+</option><option value="7">7+</option><option value="8">8+</option><option value="9">9</option></select></label>
+        <label><input type="checkbox" id="toggle-wos" checked> Show work orders</label>
+        <label><input type="checkbox" id="toggle-resp" checked> Show responders</label>
+        <label><input type="checkbox" id="toggle-inactive"> Include responders on leave</label>
+        <button id="reload-btn">Reload data</button>
       </div>
-      <div id="zip-results-body"></div>
     </div>
-  </div>
+    <div class="panel">
+      <h3>Summary</h3>
+      <div class="kv"><span>Total upcoming WOs</span><b id="stat-wos">—</b></div>
+      <div class="kv"><span>Unique cities</span><b id="stat-cities">—</b></div>
+      <div class="kv"><span>Active responders</span><b id="stat-resp">—</b></div>
+      <div class="kv"><span>States touched</span><b id="stat-states">—</b></div>
+    </div>
+    <div class="panel">
+      <h3>Top Hotspots</h3>
+      <div id="hotspots-list"></div>
+    </div>
+    <div class="panel">
+      <h3>Coverage Gaps</h3>
+      <div id="gaps-list"></div>
+      <div class="gap-note">Cities with WOs and no active responder within 150 miles.</div>
+    </div>
+  </aside>
 </div>
+<div class="status" id="status">Initializing…</div>
+
 <script>
-const API_KEY  = "AIzaSyCXalP4vszPKPOVN9Y5pzNbfjJjF4VN7VY";
-const SHEET_ID = "14VbFR3dKRCb2LoalZQxTYMSN8g_IXhmCDQci3112D50";
-const SHEET_URL = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/MASTER!A3:U200?key=${API_KEY}`;
-const RATING_COLORS = {7:"#1E8449",6:"#27AE60",5:"#F4D03F",4:"#E67E22",3:"#E74C3C"};
-const COORDS = {
-  "Allison, Terri":    {lat:29.5572,lng:-95.7835},
-  "Appleby, Brian":    {lat:40.7282,lng:-73.3271},
-  "Bauer, David":      {lat:34.0967,lng:-118.0956},
-  "Beard, Ryan":       {lat:45.7831,lng:-122.5345},
-  "Blues, David":      {lat:38.9067,lng:-94.6190},
-  "Bonney, Rick":      {lat:38.5739,lng:-90.3455},
-  "Casper, Nick":      {lat:41.6934,lng:-87.6961},
-  "Donohue, Scott":    {lat:34.8762,lng:-83.9793},
-  "Dunkelberg, Clark": {lat:33.8840,lng:-98.5845},
-  "Flaherty, Michael": {lat:35.6701,lng:-82.6096},
-  "Garcia, George":    {lat:38.3565,lng:-121.9877},
-  "Gilling, Bob":      {lat:41.9015,lng:-87.6678},
-  "Hamilton, Eric":    {lat:37.9317,lng:-89.5651},
-  "Harris, Valerie":   {lat:42.3834,lng:-83.1454},
-  "Harrison, Randy":   {lat:44.6365,lng:-123.1059},
-  "Hemingway, Sean":   {lat:26.1901,lng:-80.0959},
-  "Hix, Todd":         {lat:34.5700,lng:-112.4685},
-  "Hughes, Michael":   {lat:40.1737,lng:-80.2462},
-  "Jacob, John":       {lat:28.2108,lng:-82.4735},
-  "Johnson, Curtis":   {lat:26.0056,lng:-80.2534},
-  "Jones, Dan":        {lat:35.5829,lng:-78.7997},
-  "Kearns, Brad":      {lat:47.2793,lng:-122.2284},
-  "Kelly, Tim":        {lat:40.0918,lng:-82.6835},
-  "McFarland, Ryan":   {lat:35.2271,lng:-80.8431},
-  "Mills, Steve":      {lat:38.9498,lng:-76.1947},
-  "Monteau, Don":      {lat:30.7974,lng:-81.6957},
-  "Moreno, Ernie":     {lat:33.9425,lng:-117.2297},
-  "Nicholas, Sidney":  {lat:42.3314,lng:-83.0458},
-  "Payton, Treina":    {lat:37.5407,lng:-77.4360},
-  "Phillips, Tony":    {lat:35.3960,lng:-80.6206},
-  "Riley, Bob":        {lat:35.6729,lng:-81.2201},
-  "Robins, David":     {lat:31.7619,lng:-106.4850},
-  "Sparger, Jeff":     {lat:31.8479,lng:-106.3009},
-  "Staycoff, Rob":     {lat:45.2594,lng:-93.4563},
-  "Talps, Bernard":    {lat:33.6773,lng:-84.7388},
-  "Torres, Andres":    {lat:36.0060,lng:-115.1854},
-  "Tubberville, Jack": {lat:35.5290,lng:-86.5747},
-  "Wagner, James":     {lat:35.8326,lng:-78.6436},
-  "Werner, Thomas":    {lat:31.7093,lng:-99.0018},
-  "Whicker, Steven":   {lat:39.7084,lng:-86.3027},
-};
-let map, allTechs=[], markers=[], openInfoWindow=null, searchMarker=null, searchInfoWindow=null;
-function isInactive(t){ return t.notes&&t.notes.toLowerCase().includes("on leave"); }
-function isRM(t){ return t.title&&t.title.toLowerCase().includes("regional manager"); }
-function isSDM(t){ return t.title&&t.title.toLowerCase().includes("service delivery"); }
-function parseServices(row){
-  const s=[];
-  if(row[8]==="Yes") s.push("Audio");
-  if(row[10]==="Yes") s.push("QN Fit");
-  if(row[11]==="Yes") s.push("QL Fit");
-  if(row[12]==="Yes") s.push("PFT");
-  if(row[14]==="Yes") s.push("Air Monitor");
-  if(row[15]==="Yes") s.push("Dosimetry");
-  if(row[16]==="Yes") s.push("NLS");
-  if(row[17]==="Yes") s.push("ENLS");
-  return s;
-}
-function techFromRow(row){
-  return {
-    name:row[0]||"",region:row[1]||"",state:row[2]||"",bilingual:row[3]||"",
-    title:row[4]||"",phone:row[5]||"",email:row[6]||"",address:row[7]||"",
-    audExp:row[9]||"",nioshExp:row[13]||"",rating:parseInt(row[18])||0,
-    notes:row[19]||"",flags:row[20]||"",services:parseServices(row),
-  };
-}
-async function loadData(){
-  try{
-    const r=await fetch(SHEET_URL);
-    const d=await r.json();
-    if(!d.values) return [];
-    return d.values.filter(r=>r[0]).map(techFromRow);
-  }catch(e){ console.error(e); return []; }
-}
-function makePinSVG(tech){
-  const rm=isRM(tech), sdm=isSDM(tech), inactive=isInactive(tech);
-  const opacity=inactive?"0.45":"1";
-  if(rm||sdm){
-    const c=rm?"#2E86C1":"#A569BD";
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="46" height="46" viewBox="0 0 46 46" opacity="${opacity}">
-      <polygon points="23,2 28,18 45,18 32,29 37,45 23,34 9,45 14,29 1,18 18,18" fill="${c}" stroke="#fff" stroke-width="2"/>
-      <text x="23" y="28" text-anchor="middle" font-size="10" font-weight="bold" fill="#fff" font-family="Arial">${tech.rating}</text>
-    </svg>`;
-  }
-  const c=inactive?"#bbb":RATING_COLORS[tech.rating]||"#999";
-  const tc=(!inactive&&tech.rating===5)?"#444":"#fff";
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="34" height="44" viewBox="0 0 34 44" opacity="${opacity}">
-    <path d="M17 1C8.163 1 1 8.163 1 17c0 11 16 26 16 26S33 28 33 17C33 8.163 25.837 1 17 1z" fill="${c}" stroke="#fff" stroke-width="2"/>
-    <text x="17" y="22" text-anchor="middle" font-size="12" font-weight="bold" fill="${tc}" font-family="Arial">${tech.rating}</text>
-  </svg>`;
-}
-function makeSearchPinSVG(){
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="42" height="54" viewBox="0 0 42 54">
-    <defs>
-      <filter id="ds" x="-20%" y="-20%" width="140%" height="140%">
-        <feDropShadow dx="0" dy="2" stdDeviation="1.5" flood-opacity="0.4"/>
-      </filter>
-    </defs>
-    <path d="M21 1C10.51 1 2 9.51 2 20c0 13.5 19 33 19 33s19-19.5 19-33C40 9.51 31.49 1 21 1z" fill="#E74C3C" stroke="#fff" stroke-width="2.5" filter="url(#ds)"/>
-    <circle cx="21" cy="20" r="7" fill="#fff"/>
-    <circle cx="21" cy="20" r="3.5" fill="#E74C3C"/>
-  </svg>`;
-}
-function makeMarker(tech){
-  const coords=COORDS[tech.name];
-  if(!coords) return null;
-  const large=isRM(tech)||isSDM(tech);
-  const icon={
-    url:'data:image/svg+xml;charset=UTF-8,'+encodeURIComponent(makePinSVG(tech)),
-    scaledSize:large?new google.maps.Size(46,46):new google.maps.Size(34,44),
-    anchor:large?new google.maps.Point(23,44):new google.maps.Point(17,44),
-  };
-  const marker=new google.maps.Marker({
-    position:coords, map, icon, title:tech.name,
-    zIndex:large?10:1, visible:false,
-  });
-  const rc=isRM(tech)?"#2E86C1":isSDM(tech)?"#A569BD":"#1F3864";
-  const servicesBadges=tech.services.map(s=>`<span class="badge">${s}</span>`).join('');
-  const bilingualBadge=tech.bilingual==="Yes"?`<span class="badge" style="background:#E8F8E8;color:#1a6b1a">Bilingual</span>`:'';
-  const inactiveBadge=isInactive(tech)?`<span class="badge inactive-badge">On Leave</span>`:'';
-  const flagHtml=tech.flags?`<div style="background:#FFF9C4;border:1px solid #F4D03F;border-radius:4px;padding:5px 7px;font-size:11px;color:#7D6608;margin-top:6px">&#9888; ${tech.flags}</div>`:'';
-  const iw=new google.maps.InfoWindow({maxWidth:270,content:`
-    <div style="font-family:Arial;font-size:12px;max-width:250px;line-height:1.5">
-      <div style="font-weight:700;font-size:14px;color:${rc};margin-bottom:3px">${tech.name} ${inactiveBadge}</div>
-      <div style="color:#555;margin-bottom:5px">${tech.title}${tech.region?' &middot; '+tech.region:''}</div>
-      <div style="margin-bottom:5px"><strong>Rating:</strong> <span style="color:${RATING_COLORS[tech.rating]||'#999'};font-weight:700;font-size:14px">${tech.rating}/7</span></div>
-      ${tech.phone?`<div style="margin-bottom:2px">&#128222; <a href="tel:${tech.phone}" style="color:#1F3864">${tech.phone}</a></div>`:''}
-      ${tech.email?`<div style="margin-bottom:5px;word-break:break-all">&#9993; <a href="mailto:${tech.email}" style="color:#1F3864">${tech.email}</a></div>`:''}
-      ${tech.address?`<div style="margin-bottom:5px;color:#666;font-size:11px">&#128205; ${tech.address}</div>`:''}
-      <div>${servicesBadges}${bilingualBadge}</div>
-      ${tech.audExp&&tech.audExp!=="Active"?`<div style="font-size:10px;color:#888;margin-top:4px">Audio exp: ${tech.audExp}</div>`:''}
-      ${tech.nioshExp&&tech.nioshExp!=="Active"?`<div style="font-size:10px;color:#888">NIOSH exp: ${tech.nioshExp}</div>`:''}
-      ${tech.notes?`<div style="margin-top:6px;color:#555;font-size:11px;font-style:italic;border-top:1px solid #eee;padding-top:5px">&#128203; ${tech.notes}</div>`:''}
-      ${flagHtml}
-    </div>`});
-  marker.addListener('click',()=>{
-    if(openInfoWindow) openInfoWindow.close();
-    iw.open(map,marker);
-    openInfoWindow=iw;
-  });
-  return {marker,tech};
-}
-function populateRegions(){
-  const regions=[...new Set(allTechs.map(t=>t.region).filter(Boolean))].sort();
-  const sel=document.getElementById('f-region');
-  regions.forEach(r=>{const o=document.createElement('option');o.value=r;o.textContent=r;sel.appendChild(o);});
-}
-function applyFilters(){
-  const region=document.getElementById('f-region').value;
-  const service=document.getElementById('f-service').value;
-  const minRating=parseInt(document.getElementById('f-rating').value)||0;
-  const bilingual=document.getElementById('f-bilingual').value;
-  const search=document.getElementById('search').value.toLowerCase().trim();
-  const showInactive=document.getElementById('toggle-inactive').checked;
-  let visible=0;
-  markers.forEach(({marker,tech})=>{
-    const show=(showInactive||!isInactive(tech))&&
-      (!region||tech.region===region)&&
-      (!service||tech.services.includes(service))&&
-      (tech.rating>=minRating)&&
-      (!bilingual||tech.bilingual===bilingual)&&
-      (!search||tech.name.toLowerCase().includes(search));
-    marker.setVisible(show);
-    if(show) visible++;
-  });
-  document.getElementById('count-badge').textContent=`${visible} shown`;
-}
-function haversine(lat1,lng1,lat2,lng2){
-  const R=3958.8,dLat=(lat2-lat1)*Math.PI/180,dLng=(lng2-lng1)*Math.PI/180;
-  const a=Math.sin(dLat/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
-  return Math.round(R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a)));
-}
-function clearSearchMarker(){
-  if(searchMarker){ searchMarker.setMap(null); searchMarker=null; }
-  if(searchInfoWindow){ searchInfoWindow.close(); searchInfoWindow=null; }
-}
-function showNameDropdown(){
-  const q=document.getElementById('search').value.toLowerCase().trim();
-  const dd=document.getElementById('name-dropdown');
-  if(!q){dd.style.display='none';dd.innerHTML='';return;}
-  const matches=markers.filter(({tech})=>tech.name.toLowerCase().includes(q)).slice(0,8);
-  if(matches.length===0){
-    dd.innerHTML='<div class="dd-empty">No matches</div>';
-    dd.style.display='block';
-    return;
-  }
-  const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-  dd.innerHTML=matches.map(({tech})=>{
-    const detail=[tech.title,tech.region].filter(Boolean).join(' &middot; ');
-    return `<div class="dd-item" data-name="${esc(tech.name)}">
-      <div class="dd-name">${tech.name}</div>
-      <div class="dd-detail">${detail||'&nbsp;'}</div>
-    </div>`;
-  }).join('');
-  dd.style.display='block';
-}
-function selectResponder(name){
-  const match=markers.find(({tech})=>tech.name===name);
-  if(!match) return;
-  const {marker,tech}=match;
-  // Clear name filter so the selected marker is visible
-  document.getElementById('search').value='';
-  applyFilters();
-  marker.setVisible(true);
-  const coords=COORDS[tech.name];
-  if(coords){
-    map.panTo(coords);
-    map.setZoom(9);
-  }
-  google.maps.event.trigger(marker,'click');
-  document.getElementById('name-dropdown').style.display='none';
-}
-async function findNearest(){
-  const zip=document.getElementById('zip-input').value.trim();
-  if(!zip||zip.length<5) return;
-  try{
-    const r=await fetch(`https://api.zippopotam.us/us/${zip}`);
-    if(!r.ok){alert('Could not find that zip code.');return;}
-    const d=await r.json();
-    const lat=parseFloat(d.places[0].latitude);
-    const lng=parseFloat(d.places[0].longitude);
-    const placeName=d.places[0]['place name']||'';
-    const stateAbbr=d.places[0]['state abbreviation']||'';
-    const locLabel=placeName?`${placeName}, ${stateAbbr}`:zip;
+// ============================================================
+// CONFIG — adjust if you move the sheet or rename tabs
+// ============================================================
+const SHEET_ID = '14VbFR3dKRCb2LoalZQxTYMSN8g_IXhmCDQci3112D50';
+const WO_FEED_TAB = 'WO_HEAT_FEED';
+const META_TAB = 'WO_HEAT_META';
+const RESPONDER_TAB = 'MASTER'; // or 'MAPS EXPORT' depending on which is the cleanest source
+const COVERAGE_RADIUS_MI = 150;
 
-    // Drop a pin at the exact searched zip code location
-    clearSearchMarker();
-    searchMarker=new google.maps.Marker({
-      position:{lat,lng},
-      map,
-      icon:{
-        url:'data:image/svg+xml;charset=UTF-8,'+encodeURIComponent(makeSearchPinSVG()),
-        scaledSize:new google.maps.Size(42,54),
-        anchor:new google.maps.Point(21,54),
-      },
-      title:`Searched: ${zip} (${locLabel})`,
-      zIndex:9999,
-      animation:google.maps.Animation.DROP,
-    });
-    searchInfoWindow=new google.maps.InfoWindow({content:`
-      <div style="font-family:Arial;font-size:12px;line-height:1.5">
-        <div style="font-weight:700;font-size:13px;color:#E74C3C;margin-bottom:2px">&#128205; Searched Location</div>
-        <div style="color:#333"><strong>${zip}</strong></div>
-        <div style="color:#666">${locLabel}</div>
-      </div>`});
-    searchMarker.addListener('click',()=>{
-      if(openInfoWindow) openInfoWindow.close();
-      searchInfoWindow.open(map,searchMarker);
-      openInfoWindow=searchInfoWindow;
-    });
+// gviz CSV endpoint (works for any tab in a sheet that's set to "Anyone with the link can view")
+function gvizCsv(sheetName) {
+  return 'https://docs.google.com/spreadsheets/d/' + SHEET_ID +
+         '/gviz/tq?tqx=out:csv&sheet=' + encodeURIComponent(sheetName);
+}
 
-    const showInactive=document.getElementById('toggle-inactive').checked;
-    const service=document.getElementById('f-service').value;
-    // Exclude Regional Managers and Service Delivery Managers; respect Service filter if set
-    const ranked=markers
-      .filter(({tech})=>COORDS[tech.name]&&(showInactive||!isInactive(tech))&&!isRM(tech)&&!isSDM(tech)&&(!service||tech.services.includes(service)))
-      .map(({tech})=>({...tech,dist:haversine(lat,lng,COORDS[tech.name].lat,COORDS[tech.name].lng)}))
-      .sort((a,b)=>a.dist-b.dist).slice(0,5);
-    document.getElementById('zip-title').textContent=service?`Nearest ${service} to ${zip}`:`Nearest to ${zip}`;
-    const escHtml=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-    document.getElementById('zip-results-body').innerHTML=ranked.map(t=>{
-      const hasInfo=!!(t.notes||t.flags);
-      const parts=[];
-      if(t.notes) parts.push(`<span class="zip-tooltip-label">NOTES</span>${escHtml(t.notes)}`);
-      if(t.flags) parts.push(`<div class="zip-tooltip-flag"><span class="zip-tooltip-label">FLAGS</span>${escHtml(t.flags)}</div>`);
-      const tooltip=hasInfo?`<span class="zip-tooltip">${parts.join('')}</span>`:'';
-      const cls=hasInfo?'zip-name has-info':'zip-name';
-      return `
-      <div class="zip-row">
-        <span class="${cls}">${t.name}${tooltip}</span><span class="zip-dist">${t.dist} mi</span>
-        <div class="zip-detail">${t.title} &middot; Rating ${t.rating}/7 &middot; ${t.region}</div>
-        <div class="zip-detail">${t.phone||'No phone on file'}</div>
-        <div>${t.services.slice(0,4).map(s=>`<span class="badge">${s}</span>`).join('')}${t.services.length>4?`<span class="badge">+${t.services.length-4}</span>`:''}${isInactive(t)?`<span class="badge inactive-badge">On Leave</span>`:''}</div>
-      </div>`;}).join('');
-    document.getElementById('zip-results').style.display='block';
-    map.setZoom(7);
-    map.panTo({lat,lng});
-    // Offset the map so the dropped pin sits below the results panel, not behind it
-    map.panBy(0,-170);
-  }catch(e){alert('Error geocoding zip code.');}
+// ============================================================
+// State
+// ============================================================
+let map, woHeatLayer, woMarkerLayer, respMarkerLayer;
+let woData = [], respData = [], metaData = {};
+
+// ============================================================
+// Init
+// ============================================================
+function initMap() {
+  map = L.map('map', { zoomControl: true }).setView([39.5, -98.35], 4);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+    attribution: '© OpenStreetMap contributors © CARTO',
+    subdomains: 'abcd',
+    maxZoom: 19
+  }).addTo(map);
+
+  woHeatLayer = L.heatLayer([], { radius: 28, blur: 22, maxZoom: 8, minOpacity: 0.4, gradient: { 0.2: '#ffd000', 0.5: '#ff7e1f', 0.8: '#d62e1f', 1.0: '#7a0d05' } }).addTo(map);
+  woMarkerLayer = L.layerGroup().addTo(map);
+  respMarkerLayer = L.layerGroup().addTo(map);
 }
-async function initMap(){
-  map=new google.maps.Map(document.getElementById('map'),{
-    center:{lat:37.5,lng:-95},zoom:4,
-    mapTypeControl:false,streetViewControl:false,fullscreenControl:true,
-    styles:[{featureType:"poi",stylers:[{visibility:"off"}]},{featureType:"transit",stylers:[{visibility:"off"}]}]
-  });
-  allTechs=await loadData();
-  if(!allTechs.length){document.getElementById('count-badge').textContent='Sheet error — check sharing settings';return;}
-  populateRegions();
-  markers=allTechs.map(makeMarker).filter(Boolean);
-  applyFilters();
-  ['f-region','f-service','f-rating','f-bilingual'].forEach(id=>document.getElementById(id).addEventListener('change',applyFilters));
-  document.getElementById('search').addEventListener('input',()=>{applyFilters();showNameDropdown();});
-  document.getElementById('search').addEventListener('focus',showNameDropdown);
-  document.getElementById('name-dropdown').addEventListener('click',e=>{
-    const item=e.target.closest('.dd-item');
-    if(item) selectResponder(item.getAttribute('data-name'));
-  });
-  document.addEventListener('click',e=>{
-    if(!e.target.closest('.search-wrap')) document.getElementById('name-dropdown').style.display='none';
-  });
-  document.getElementById('toggle-inactive').addEventListener('change',applyFilters);
-  document.getElementById('zip-btn').addEventListener('click',findNearest);
-  document.getElementById('zip-input').addEventListener('keydown',e=>{if(e.key==='Enter')findNearest();});
-  document.getElementById('zip-close').addEventListener('click',()=>{
-    document.getElementById('zip-results').style.display='none';
-    clearSearchMarker();
-  });
-  map.addListener('click',()=>{if(openInfoWindow){openInfoWindow.close();openInfoWindow=null;}});
+
+async function loadAll() {
+  setStatus('Loading WO data from Sheet…');
+  try {
+    const [woRows, respRows, metaRows] = await Promise.all([
+      fetchCsv(gvizCsv(WO_FEED_TAB)),
+      fetchCsv(gvizCsv(RESPONDER_TAB)),
+      fetchCsv(gvizCsv(META_TAB)).catch(() => [])
+    ]);
+
+    woData = woRows
+      .map(r => ({
+        wo: r['WO'],
+        name: r['Deal Name'],
+        start: r['Start Date'],
+        address: r['Address'],
+        city: r['City'],
+        state: r['State'],
+        lat: parseFloat(r['Lat']),
+        lng: parseFloat(r['Lng']),
+        summary: r['Schedule Summary']
+      }))
+      .filter(r => r.wo && !isNaN(r.lat) && !isNaN(r.lng));
+
+    respData = respRows
+      .map(r => ({
+        name: r['Name'],
+        region: r['Region'] || '',
+        state: r['Home State'] || '',
+        title: r['Title'] || '',
+        rating: parseInt(r['Svc Rating'] || r['Rating'] || '0', 10) || 0,
+        bilingual: (r['Bilingual'] || '').toLowerCase().startsWith('y'),
+        notes: r['Notes / Idiosyncrasies'] || r['Notes'] || '',
+        address: r['Address'] || '',
+        // We don't have lat/lng in MASTER; the responder map sheet typically resolves these client-side.
+        // For now we'll pass the address through; future work: bake lat/lng into a MASTER_GEO tab too.
+        lat: parseFloat(r['Lat'] || ''),
+        lng: parseFloat(r['Lng'] || '')
+      }))
+      .filter(r => r.name);
+
+    metaRows.forEach(r => { metaData[r['Key'] || r[0]] = r['Value'] || r[1]; });
+
+    // If responder rows lack lat/lng, geocode their addresses client-side using Nominatim
+    // (one-time, cached in localStorage so reloads are instant).
+    await ensureResponderCoords(respData);
+
+    document.getElementById('meta').textContent = buildMetaText();
+    setStatus('Ready. ' + woData.length + ' WOs · ' + respData.length + ' responders.');
+    redraw();
+  } catch (e) {
+    console.error(e);
+    setStatus('Error loading data: ' + e.message + ' — make sure the WO_HEAT_FEED tab is published and the sync has run.');
+  }
 }
-window.initMap=initMap;
-</script>
-<script async defer
-  src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCXalP4vszPKPOVN9Y5pzNbfjJjF4VN7VY&callback=initMap">
+
+function fetchCsv(url) {
+  return new Promise((resolve, reject) => {
+    Papa.parse(url, {
+      download: true,
+      header: true,
+      skipEmptyLines: true,
+      complete: (res) => resolve(res.data),
+      error: reject
+    });
+  });
+}
+
+// Responder address geocoding — Nominatim, rate-limited, localStorage cache
+async function ensureResponderCoords(rows) {
+  const cache = JSON.parse(localStorage.getItem('mhd_resp_geo') || '{}');
+  let updated = false;
+  for (const r of rows) {
+    if (!isNaN(r.lat) && !isNaN(r.lng)) continue; // already geocoded server-side
+    if (!r.address) continue;
+    const key = (r.address || '').toLowerCase();
+    if (cache[key]) {
+      r.lat = cache[key].lat; r.lng = cache[key].lng;
+      continue;
+    }
+    // Extract city, state, zip for cleaner geocoding
+    const m = r.address.match(/^.+?,\s*([^,]+?)\s*,?\s+([A-Z]{2})\s+\d{5}/i);
+    const q = m ? (m[1] + ', ' + m[2] + ', USA') : (r.address + ', USA');
+    try {
+      const u = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=us&q=' + encodeURIComponent(q);
+      const res = await fetch(u, { headers: { 'Accept': 'application/json' } });
+      const data = await res.json();
+      if (data && data[0]) {
+        r.lat = parseFloat(data[0].lat); r.lng = parseFloat(data[0].lon);
+        cache[key] = { lat: r.lat, lng: r.lng };
+        updated = true;
+      }
+    } catch (e) { /* swallow */ }
+    await sleep(1100); // Nominatim 1/sec rate limit
+  }
+  if (updated) localStorage.setItem('mhd_resp_geo', JSON.stringify(cache));
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ============================================================
+// Filters & redraw
+// ============================================================
+function bindControls() {
+  ['filter-service', 'filter-region', 'filter-rating', 'toggle-wos', 'toggle-resp', 'toggle-inactive']
+    .forEach(id => document.getElementById(id).addEventListener('change', redraw));
+  document.getElementById('reload-btn').addEventListener('click', () => {
+    setStatus('Reloading…');
+    loadAll();
+  });
+}
+
+function redraw() {
+  const fService = document.getElementById('filter-service').value.toLowerCase();
+  const fRegion = document.getElementById('filter-region').value;
+  const fRating = parseInt(document.getElementById('filter-rating').value, 10) || 0;
+  const showWOs = document.getElementById('toggle-wos').checked;
+  const showResp = document.getElementById('toggle-resp').checked;
+  const includeInactive = document.getElementById('toggle-inactive').checked;
+
+  // Filter WOs by service text
+  const filteredWOs = woData.filter(w => {
+    if (!fService) return true;
+    const t = ((w.name || '') + ' ' + (w.summary || '')).toLowerCase();
+    return t.includes(fService);
+  });
+
+  // Aggregate WOs by city for hotspots + heat intensity
+  const byCity = {};
+  filteredWOs.forEach(w => {
+    const k = (w.city + '|' + w.state).toLowerCase();
+    if (!byCity[k]) byCity[k] = { city: w.city, state: w.state, lat: w.lat, lng: w.lng, wos: [] };
+    byCity[k].wos.push(w);
+  });
+  const cities = Object.values(byCity).sort((a, b) => b.wos.length - a.wos.length);
+
+  // WO heat layer points: [lat, lng, intensity]
+  woHeatLayer.setLatLngs(showWOs ? cities.map(c => [c.lat, c.lng, c.wos.length]) : []);
+
+  // WO marker overlay (clickable centered dots for popup interaction)
+  woMarkerLayer.clearLayers();
+  if (showWOs) {
+    cities.forEach(c => {
+      const m = L.circleMarker([c.lat, c.lng], {
+        radius: 4 + Math.sqrt(c.wos.length) * 2,
+        color: '#7a0d05', weight: 1, fillColor: '#d62e1f', fillOpacity: 0.0  // invisible; for click target
+      });
+      m.bindPopup(buildWoPopup(c), { maxWidth: 320 });
+      m.addTo(woMarkerLayer);
+    });
+  }
+
+  // Responder filter
+  const filteredResp = respData.filter(r => {
+    if (fRegion && r.region.indexOf(fRegion) === -1) return false;
+    if (fRating && r.rating < fRating) return false;
+    if (!includeInactive && /leave/i.test(r.notes || '')) return false;
+    return true;
+  });
+
+  respMarkerLayer.clearLayers();
+  if (showResp) {
+    filteredResp.forEach(r => {
+      if (isNaN(r.lat) || isNaN(r.lng)) return;
+      const isLead = /Lead|Manager|SDM/i.test(r.region || '') || /Manager|Director|SDM/i.test(r.title || '');
+      const isInactive = /leave/i.test(r.notes || '');
+      const icon = L.divIcon({
+        className: 'resp-marker' + (isLead ? ' lead' : '') + (isInactive ? ' inactive' : ''),
+        iconSize: [isLead ? 14 : 11, isLead ? 14 : 11],
+        iconAnchor: [isLead ? 7 : 5.5, isLead ? 7 : 5.5]
+      });
+      const marker = L.marker([r.lat, r.lng], { icon: icon });
+      marker.bindPopup(buildRespPopup(r), { maxWidth: 280 });
+      marker.addTo(respMarkerLayer);
+    });
+  }
+
+  // Stats
+  document.getElementById('stat-wos').textContent = filteredWOs.length;
+  document.getElementById('stat-cities').textContent = cities.length;
+  document.getElementById('stat-resp').textContent = filteredResp.filter(r => !/leave/i.test(r.notes || '')).length;
+  document.getElementById('stat-states').textContent = new Set(cities.map(c => c.state)).size;
+
+  // Top hotspots
+  document.getElementById('hotspots-list').innerHTML = cities.slice(0, 10).map(c =>
+    `<div class="row"><span class="count">${c.wos.length}</span><span class="where">${escapeHtml(c.city)}, ${escapeHtml(c.state)}</span></div>`
+  ).join('') || '<div class="gap-note">No matches</div>';
+
+  // Coverage gaps
+  const activeResp = filteredResp.filter(r => !/leave/i.test(r.notes || '') && !isNaN(r.lat) && !isNaN(r.lng));
+  const gaps = cities.filter(c =>
+    !activeResp.some(r => distMiles(c.lat, c.lng, r.lat, r.lng) < COVERAGE_RADIUS_MI)
+  ).slice(0, 15);
+  document.getElementById('gaps-list').innerHTML = gaps.length > 0
+    ? gaps.map(c => `<div class="row"><span class="count">${c.wos.length}</span><span class="where">${escapeHtml(c.city)}, ${escapeHtml(c.state)}</span></div>`).join('')
+    : '<div class="gap-note">No gaps with current filters.</div>';
+}
+
+// ============================================================
+// Helpers
+// ============================================================
+function buildWoPopup(c) {
+  const items = c.wos.slice(0, 6).map(w => `<li><b>WO ${escapeHtml(w.wo)}</b> · ${escapeHtml(w.start)}<br><span class="sub">${escapeHtml((w.name || '').substring(0, 100))}</span></li>`).join('');
+  const more = c.wos.length > 6 ? `<div class="sub">+ ${c.wos.length - 6} more</div>` : '';
+  return `<h4>${escapeHtml(c.city)}, ${escapeHtml(c.state)} — ${c.wos.length} WO${c.wos.length > 1 ? 's' : ''}</h4><ul>${items}</ul>${more}`;
+}
+
+function buildRespPopup(r) {
+  const bits = [r.title, 'Region ' + r.region, 'Rating ' + r.rating, r.bilingual ? 'Bilingual' : null]
+    .filter(Boolean).map(escapeHtml).join(' · ');
+  return `<h4>${escapeHtml(r.name)}</h4><div class="sub">${escapeHtml(r.state)}</div><div>${bits}</div>${r.notes ? `<div class="sub" style="margin-top:4px;font-style:italic">${escapeHtml(r.notes)}</div>` : ''}`;
+}
+
+function distMiles(lat1, lng1, lat2, lng2) {
+  const R = 3959, toRad = d => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1), dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.asin(Math.sqrt(a));
+}
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+}
+
+function buildMetaText() {
+  const upd = metaData['updated_at'] || '(unknown)';
+  return 'Window: today → +120 days · Sheet last synced: ' + upd;
+}
+
+function setStatus(msg) { document.getElementById('status').textContent = msg; }
+
+// ============================================================
+// Go
+// ============================================================
+initMap();
+bindControls();
+loadAll();
 </script>
 </body>
 </html>

@@ -42,13 +42,24 @@ input:checked+.slider:before{transform:translateX(16px)}
 .zip-row{padding:8px 0;border-bottom:1px solid #f0f0f0;font-size:12px}
 .zip-row:last-child{border-bottom:none}
 .zip-name{font-weight:700;color:#1F3864;font-size:13px;position:relative;display:inline-block}
-.zip-name[data-notes]{cursor:help;border-bottom:1px dotted #888}
-.zip-name[data-notes]:hover::after{content:attr(data-notes);position:absolute;left:0;top:calc(100% + 6px);background:#1F3864;color:#fff;padding:7px 10px;border-radius:5px;font-size:11px;font-weight:400;white-space:normal;width:240px;z-index:100;box-shadow:0 3px 10px rgba(0,0,0,0.25);line-height:1.4;pointer-events:none}
-.zip-name[data-notes]:hover::before{content:"";position:absolute;left:14px;top:100%;border:6px solid transparent;border-bottom-color:#1F3864;z-index:100;pointer-events:none}
+.zip-name.has-info{cursor:help;border-bottom:1px dotted #888}
+.zip-tooltip{display:none;position:absolute;left:0;top:calc(100% + 8px);background:#1F3864;color:#fff;padding:8px 11px;border-radius:5px;font-size:11px;font-weight:400;white-space:normal;width:260px;z-index:200;box-shadow:0 3px 12px rgba(0,0,0,0.3);line-height:1.45;pointer-events:none}
+.zip-name.has-info:hover .zip-tooltip{display:block}
+.zip-tooltip:before{content:"";position:absolute;left:14px;bottom:100%;border:6px solid transparent;border-bottom-color:#1F3864}
+.zip-tooltip-label{display:block;color:#FFD700;font-weight:700;font-size:9px;letter-spacing:0.6px;margin-bottom:2px}
+.zip-tooltip-flag{margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.25)}
 .zip-dist{color:#27AE60;font-weight:700;float:right}
 .zip-detail{color:#666;margin-top:2px}
 .badge{display:inline-block;padding:2px 6px;border-radius:10px;font-size:10px;font-weight:700;margin:1px;background:#E8F4FD;color:#1F3864}
 .inactive-badge{background:#f0f0f0;color:#999}
+.search-wrap{position:relative}
+#name-dropdown{position:absolute;top:calc(100% + 3px);left:0;background:#fff;border-radius:5px;box-shadow:0 4px 14px rgba(0,0,0,0.28);min-width:240px;max-height:300px;overflow-y:auto;z-index:50;display:none}
+.dd-item{padding:7px 11px;cursor:pointer;color:#1F3864;font-size:12px;border-bottom:1px solid #f0f0f0}
+.dd-item:last-child{border-bottom:none}
+.dd-item:hover,.dd-item.active{background:#E8F4FD}
+.dd-name{font-weight:700;color:#1F3864;font-size:12px}
+.dd-detail{color:#666;font-size:10px;margin-top:1px}
+.dd-empty{padding:10px 11px;color:#999;font-size:11px;font-style:italic}
 </style>
 </head>
 <body>
@@ -90,8 +101,9 @@ input:checked+.slider:before{transform:translateX(16px)}
         <option value="Yes">Yes</option>
       </select>
     </div>
-    <div class="filter-group">
-      <input type="text" id="search" placeholder="Search name...">
+    <div class="filter-group search-wrap">
+      <input type="text" id="search" placeholder="Search name..." autocomplete="off">
+      <div id="name-dropdown"></div>
     </div>
     <div class="toggle-wrap">
       <label class="toggle"><input type="checkbox" id="toggle-inactive"><span class="slider"></span></label>
@@ -309,6 +321,42 @@ function clearSearchMarker(){
   if(searchMarker){ searchMarker.setMap(null); searchMarker=null; }
   if(searchInfoWindow){ searchInfoWindow.close(); searchInfoWindow=null; }
 }
+function showNameDropdown(){
+  const q=document.getElementById('search').value.toLowerCase().trim();
+  const dd=document.getElementById('name-dropdown');
+  if(!q){dd.style.display='none';dd.innerHTML='';return;}
+  const matches=markers.filter(({tech})=>tech.name.toLowerCase().includes(q)).slice(0,8);
+  if(matches.length===0){
+    dd.innerHTML='<div class="dd-empty">No matches</div>';
+    dd.style.display='block';
+    return;
+  }
+  const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  dd.innerHTML=matches.map(({tech})=>{
+    const detail=[tech.title,tech.region].filter(Boolean).join(' &middot; ');
+    return `<div class="dd-item" data-name="${esc(tech.name)}">
+      <div class="dd-name">${tech.name}</div>
+      <div class="dd-detail">${detail||'&nbsp;'}</div>
+    </div>`;
+  }).join('');
+  dd.style.display='block';
+}
+function selectResponder(name){
+  const match=markers.find(({tech})=>tech.name===name);
+  if(!match) return;
+  const {marker,tech}=match;
+  // Clear name filter so the selected marker is visible
+  document.getElementById('search').value='';
+  applyFilters();
+  marker.setVisible(true);
+  const coords=COORDS[tech.name];
+  if(coords){
+    map.panTo(coords);
+    map.setZoom(9);
+  }
+  google.maps.event.trigger(marker,'click');
+  document.getElementById('name-dropdown').style.display='none';
+}
 async function findNearest(){
   const zip=document.getElementById('zip-input').value.trim();
   if(!zip||zip.length<5) return;
@@ -355,19 +403,26 @@ async function findNearest(){
       .map(({tech})=>({...tech,dist:haversine(lat,lng,COORDS[tech.name].lat,COORDS[tech.name].lng)}))
       .sort((a,b)=>a.dist-b.dist).slice(0,5);
     document.getElementById('zip-title').textContent=`Nearest to ${zip}`;
-    const escAttr=s=>String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    const escHtml=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     document.getElementById('zip-results-body').innerHTML=ranked.map(t=>{
-      const noteAttr=t.notes?` data-notes="${escAttr(t.notes)}"`:'';
+      const hasInfo=!!(t.notes||t.flags);
+      const parts=[];
+      if(t.notes) parts.push(`<span class="zip-tooltip-label">NOTES</span>${escHtml(t.notes)}`);
+      if(t.flags) parts.push(`<div class="zip-tooltip-flag"><span class="zip-tooltip-label">FLAGS</span>${escHtml(t.flags)}</div>`);
+      const tooltip=hasInfo?`<span class="zip-tooltip">${parts.join('')}</span>`:'';
+      const cls=hasInfo?'zip-name has-info':'zip-name';
       return `
       <div class="zip-row">
-        <span class="zip-name"${noteAttr}>${t.name}</span><span class="zip-dist">${t.dist} mi</span>
+        <span class="${cls}">${t.name}${tooltip}</span><span class="zip-dist">${t.dist} mi</span>
         <div class="zip-detail">${t.title} &middot; Rating ${t.rating}/9 &middot; ${t.region}</div>
         <div class="zip-detail">${t.phone||'No phone on file'}</div>
         <div>${t.services.slice(0,4).map(s=>`<span class="badge">${s}</span>`).join('')}${t.services.length>4?`<span class="badge">+${t.services.length-4}</span>`:''}${isInactive(t)?`<span class="badge inactive-badge">On Leave</span>`:''}</div>
       </div>`;}).join('');
     document.getElementById('zip-results').style.display='block';
-    map.panTo({lat,lng});
     map.setZoom(7);
+    map.panTo({lat,lng});
+    // Offset the map so the dropped pin sits below the results panel, not behind it
+    map.panBy(0,-170);
   }catch(e){alert('Error geocoding zip code.');}
 }
 async function initMap(){
@@ -382,7 +437,15 @@ async function initMap(){
   markers=allTechs.map(makeMarker).filter(Boolean);
   applyFilters();
   ['f-region','f-service','f-rating','f-bilingual'].forEach(id=>document.getElementById(id).addEventListener('change',applyFilters));
-  document.getElementById('search').addEventListener('input',applyFilters);
+  document.getElementById('search').addEventListener('input',()=>{applyFilters();showNameDropdown();});
+  document.getElementById('search').addEventListener('focus',showNameDropdown);
+  document.getElementById('name-dropdown').addEventListener('click',e=>{
+    const item=e.target.closest('.dd-item');
+    if(item) selectResponder(item.getAttribute('data-name'));
+  });
+  document.addEventListener('click',e=>{
+    if(!e.target.closest('.search-wrap')) document.getElementById('name-dropdown').style.display='none';
+  });
   document.getElementById('toggle-inactive').addEventListener('change',applyFilters);
   document.getElementById('zip-btn').addEventListener('click',findNearest);
   document.getElementById('zip-input').addEventListener('keydown',e=>{if(e.key==='Enter')findNearest();});

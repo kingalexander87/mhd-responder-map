@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MHD Work Order Heat Map — 120 Days</title>
+
+<!-- Leaflet core -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<!-- Heatmap plugin -->
+<script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+<!-- PapaParse for robust CSV parsing -->
+<script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
+
+<style>
+:root {
+  --bg: #fafafa;
+  --panel: #ffffff;
+  --border: #e5e5e5;
+  --text: #1a1a1a;
+  --muted: #666;
+  --accent: #b81d13;
+  --responder: #2461c8;
+  --lead: #d97706;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: var(--text); background: var(--bg); }
+header { padding: 12px 16px; background: var(--panel); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
+header h1 { margin: 0; font-size: 17px; font-weight: 600; }
+header .meta { font-size: 12px; color: var(--muted); }
+.controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 12px; }
+.controls label { display: flex; align-items: center; gap: 4px; color: #333; }
+.controls select { font-size: 12px; padding: 3px 6px; border: 1px solid #d0d0d0; border-radius: 4px; background: #fff; }
+.controls button { font-size: 12px; padding: 4px 10px; border: 1px solid #d0d0d0; background: #fff; border-radius: 4px; cursor: pointer; }
+.controls button:hover { background: #f3f3f3; }
+.layout { display: grid; grid-template-columns: 1fr 300px; height: calc(100vh - 56px); }
+#map { width: 100%; height: 100%; }
+aside { background: var(--panel); border-left: 1px solid var(--border); padding: 14px 14px 60px; overflow-y: auto; font-size: 13px; }
+aside h3 { margin: 0 0 6px; font-size: 12px; font-weight: 600; color: #333; text-transform: uppercase; letter-spacing: 0.04em; }
+aside .panel { padding-bottom: 14px; margin-bottom: 14px; border-bottom: 1px solid #f0f0f0; }
+aside .panel:last-child { border-bottom: none; }
+.kv { display: flex; justify-content: space-between; padding: 2px 0; }
+.kv b { font-weight: 600; }
+.row { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px dotted #eee; }
+.row:last-child { border-bottom: none; }
+.count { font-weight: 600; color: var(--accent); min-width: 26px; text-align: right; }
+.where { flex: 1; padding-left: 8px; color: #333; }
+.gap-note { color: var(--muted); font-size: 11px; padding-top: 4px; font-style: italic; }
+.legend { display: flex; gap: 14px; font-size: 12px; align-items: center; }
+.legend-item { display: flex; align-items: center; gap: 5px; }
+.legend-swatch { width: 14px; height: 14px; border-radius: 50%; }
+.legend-swatch.wo { background: linear-gradient(135deg, rgba(255,200,0,0.7), rgba(184,29,19,0.9)); }
+.legend-swatch.resp { background: var(--responder); border-radius: 3px; }
+.legend-swatch.lead { background: var(--lead); border-radius: 3px; }
+.status { font-size: 11px; color: var(--muted); padding: 8px 16px; background: var(--panel); border-top: 1px solid var(--border); }
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  aside { border-left: none; border-top: 1px solid var(--border); max-height: 50vh; }
+  #map { height: 50vh; }
+}
+.resp-marker { background: var(--responder); border: 2px solid #fff; border-radius: 3px; box-shadow: 0 0 0 1px rgba(0,0,0,0.2); }
+.resp-marker.lead { background: var(--lead); }
+.resp-marker.inactive { background: #999; }
+.leaflet-popup-content { font-size: 13px; line-height: 1.45; }
+.leaflet-popup-content h4 { margin: 0 0 4px; font-size: 13px; }
+.leaflet-popup-content .sub { color: var(--muted); font-size: 11px; }
+.leaflet-popup-content ul { margin: 4px 0 0; padding-left: 16px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>MHD Work Order Heat Map — Next 120 Days</h1>
+    <div class="meta" id="meta">Loading…</div>
+  </div>
+  <div class="legend">
+    <div class="legend-item"><span class="legend-swatch wo"></span> WO density</div>
+    <div class="legend-item"><span class="legend-swatch resp"></span> Responder</div>
+    <div class="legend-item"><span class="legend-swatch lead"></span> Lead / Mgr</div>
+  </div>
+</header>
+
+<div class="layout">
+  <div id="map"></div>
+  <aside>
+    <div class="panel">
+      <h3>Filters</h3>
+      <div class="controls" style="flex-direction:column;align-items:stretch;gap:6px;">
+        <label>Service <select id="filter-service" style="margin-left:auto;"><option value="">All</option><option>Audio</option><option>ResFit</option><option>MEQ</option><option>Air</option><option>NLS</option><option>ENLS</option><option>Dosimetry</option></select></label>
+        <label>Responder region <select id="filter-region" style="margin-left:auto;"><option value="">All</option><option value="NE">NE</option><option value="SE">SE</option><option value="W">W</option><option value="C">C</option></select></label>
+        <label>Min responder rating <select id="filter-rating" style="margin-left:auto;"><option value="0">Any</option><option value="6">6+</option><option value="7">7+</option><option value="8">8+</option><option value="9">9</option></select></label>
+        <label><input type="checkbox" id="toggle-wos" checked> Show work orders</label>
+        <label><input type="checkbox" id="toggle-resp" checked> Show responders</label>
+        <label><input type="checkbox" id="toggle-inactive"> Include responders on leave</label>
+        <button id="reload-btn">Reload data</button>
+      </div>
+    </div>
+    <div class="panel">
+      <h3>Summary</h3>
+      <div class="kv"><span>Total upcoming WOs</span><b id="stat-wos">—</b></div>
+      <div class="kv"><span>Unique cities</span><b id="stat-cities">—</b></div>
+      <div class="kv"><span>Active responders</span><b id="stat-resp">—</b></div>
+      <div class="kv"><span>States touched</span><b id="stat-states">—</b></div>
+    </div>
+    <div class="panel">
+      <h3>Top Hotspots</h3>
+      <div id="hotspots-list"></div>
+    </div>
+    <div class="panel">
+      <h3>Coverage Gaps</h3>
+      <div id="gaps-list"></div>
+      <div class="gap-note">Cities with WOs and no active responder within 150 miles.</div>
+    </div>
+  </aside>
+</div>
+<div class="status" id="status">Initializing…</div>
+
+<script>
+// ============================================================
+// CONFIG — adjust if you move the sheet or rename tabs
+// ============================================================
+const SHEET_ID = '14VbFR3dKRCb2LoalZQxTYMSN8g_IXhmCDQci3112D50';
+const WO_FEED_TAB = 'WO_HEAT_FEED';
+const META_TAB = 'WO_HEAT_META';
+const RESPONDER_TAB = 'MASTER'; // or 'MAPS EXPORT' depending on which is the cleanest source
+const COVERAGE_RADIUS_MI = 150;
+
+// gviz CSV endpoint (works for any tab in a sheet that's set to "Anyone with the link can view")
+function gvizCsv(sheetName) {
+  return 'https://docs.google.com/spreadsheets/d/' + SHEET_ID +
+         '/gviz/tq?tqx=out:csv&sheet=' + encodeURIComponent(sheetName);
+}
+
+// ============================================================
+// State
+// ============================================================
+let map, woHeatLayer, woMarkerLayer, respMarkerLayer;
+let woData = [], respData = [], metaData = {};
+
+// ============================================================
+// Init
+// ============================================================
+function initMap() {
+  map = L.map('map', { zoomControl: true }).setView([39.5, -98.35], 4);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+    attribution: '© OpenStreetMap contributors © CARTO',
+    subdomains: 'abcd',
+    maxZoom: 19
+  }).addTo(map);
+
+  woHeatLayer = L.heatLayer([], { radius: 28, blur: 22, maxZoom: 8, minOpacity: 0.4, gradient: { 0.2: '#ffd000', 0.5: '#ff7e1f', 0.8: '#d62e1f', 1.0: '#7a0d05' } }).addTo(map);
+  woMarkerLayer = L.layerGroup().addTo(map);
+  respMarkerLayer = L.layerGroup().addTo(map);
+}
+
+async function loadAll() {
+  setStatus('Loading WO data from Sheet…');
+  try {
+    const [woRows, respRows, metaRows] = await Promise.all([
+      fetchCsv(gvizCsv(WO_FEED_TAB)),
+      fetchCsv(gvizCsv(RESPONDER_TAB)),
+      fetchCsv(gvizCsv(META_TAB)).catch(() => [])
+    ]);
+
+    woData = woRows
+      .map(r => ({
+        wo: r['WO'],
+        name: r['Deal Name'],
+        start: r['Start Date'],
+        address: r['Address'],
+        city: r['City'],
+        state: r['State'],
+        lat: parseFloat(r['Lat']),
+        lng: parseFloat(r['Lng']),
+        summary: r['Schedule Summary']
+      }))
+      .filter(r => r.wo && !isNaN(r.lat) && !isNaN(r.lng));
+
+    respData = respRows
+      .map(r => ({
+        name: r['Name'],
+        region: r['Region'] || '',
+        state: r['Home State'] || '',
+        title: r['Title'] || '',
+        rating: parseInt(r['Svc Rating'] || r['Rating'] || '0', 10) || 0,
+        bilingual: (r['Bilingual'] || '').toLowerCase().startsWith('y'),
+        notes: r['Notes / Idiosyncrasies'] || r['Notes'] || '',
+        address: r['Address'] || '',
+        // We don't have lat/lng in MASTER; the responder map sheet typically resolves these client-side.
+        // For now we'll pass the address through; future work: bake lat/lng into a MASTER_GEO tab too.
+        lat: parseFloat(r['Lat'] || ''),
+        lng: parseFloat(r['Lng'] || '')
+      }))
+      .filter(r => r.name);
+
+    metaRows.forEach(r => { metaData[r['Key'] || r[0]] = r['Value'] || r[1]; });
+
+    // If responder rows lack lat/lng, geocode their addresses client-side using Nominatim
+    // (one-time, cached in localStorage so reloads are instant).
+    await ensureResponderCoords(respData);
+
+    document.getElementById('meta').textContent = buildMetaText();
+    setStatus('Ready. ' + woData.length + ' WOs · ' + respData.length + ' responders.');
+    redraw();
+  } catch (e) {
+    console.error(e);
+    setStatus('Error loading data: ' + e.message + ' — make sure the WO_HEAT_FEED tab is published and the sync has run.');
+  }
+}
+
+function fetchCsv(url) {
+  return new Promise((resolve, reject) => {
+    Papa.parse(url, {
+      download: true,
+      header: true,
+      skipEmptyLines: true,
+      complete: (res) => resolve(res.data),
+      error: reject
+    });
+  });
+}
+
+// Responder address geocoding — Nominatim, rate-limited, localStorage cache
+async function ensureResponderCoords(rows) {
+  const cache = JSON.parse(localStorage.getItem('mhd_resp_geo') || '{}');
+  let updated = false;
+  for (const r of rows) {
+    if (!isNaN(r.lat) && !isNaN(r.lng)) continue; // already geocoded server-side
+    if (!r.address) continue;
+    const key = (r.address || '').toLowerCase();
+    if (cache[key]) {
+      r.lat = cache[key].lat; r.lng = cache[key].lng;
+      continue;
+    }
+    // Extract city, state, zip for cleaner geocoding
+    const m = r.address.match(/^.+?,\s*([^,]+?)\s*,?\s+([A-Z]{2})\s+\d{5}/i);
+    const q = m ? (m[1] + ', ' + m[2] + ', USA') : (r.address + ', USA');
+    try {
+      const u = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=us&q=' + encodeURIComponent(q);
+      const res = await fetch(u, { headers: { 'Accept': 'application/json' } });
+      const data = await res.json();
+      if (data && data[0]) {
+        r.lat = parseFloat(data[0].lat); r.lng = parseFloat(data[0].lon);
+        cache[key] = { lat: r.lat, lng: r.lng };
+        updated = true;
+      }
+    } catch (e) { /* swallow */ }
+    await sleep(1100); // Nominatim 1/sec rate limit
+  }
+  if (updated) localStorage.setItem('mhd_resp_geo', JSON.stringify(cache));
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ============================================================
+// Filters & redraw
+// ============================================================
+function bindControls() {
+  ['filter-service', 'filter-region', 'filter-rating', 'toggle-wos', 'toggle-resp', 'toggle-inactive']
+    .forEach(id => document.getElementById(id).addEventListener('change', redraw));
+  document.getElementById('reload-btn').addEventListener('click', () => {
+    setStatus('Reloading…');
+    loadAll();
+  });
+}
+
+function redraw() {
+  const fService = document.getElementById('filter-service').value.toLowerCase();
+  const fRegion = document.getElementById('filter-region').value;
+  const fRating = parseInt(document.getElementById('filter-rating').value, 10) || 0;
+  const showWOs = document.getElementById('toggle-wos').checked;
+  const showResp = document.getElementById('toggle-resp').checked;
+  const includeInactive = document.getElementById('toggle-inactive').checked;
+
+  // Filter WOs by service text
+  const filteredWOs = woData.filter(w => {
+    if (!fService) return true;
+    const t = ((w.name || '') + ' ' + (w.summary || '')).toLowerCase();
+    return t.includes(fService);
+  });
+
+  // Aggregate WOs by city for hotspots + heat intensity
+  const byCity = {};
+  filteredWOs.forEach(w => {
+    const k = (w.city + '|' + w.state).toLowerCase();
+    if (!byCity[k]) byCity[k] = { city: w.city, state: w.state, lat: w.lat, lng: w.lng, wos: [] };
+    byCity[k].wos.push(w);
+  });
+  const cities = Object.values(byCity).sort((a, b) => b.wos.length - a.wos.length);
+
+  // WO heat layer points: [lat, lng, intensity]
+  woHeatLayer.setLatLngs(showWOs ? cities.map(c => [c.lat, c.lng, c.wos.length]) : []);
+
+  // WO marker overlay (clickable centered dots for popup interaction)
+  woMarkerLayer.clearLayers();
+  if (showWOs) {
+    cities.forEach(c => {
+      const m = L.circleMarker([c.lat, c.lng], {
+        radius: 4 + Math.sqrt(c.wos.length) * 2,
+        color: '#7a0d05', weight: 1, fillColor: '#d62e1f', fillOpacity: 0.0  // invisible; for click target
+      });
+      m.bindPopup(buildWoPopup(c), { maxWidth: 320 });
+      m.addTo(woMarkerLayer);
+    });
+  }
+
+  // Responder filter
+  const filteredResp = respData.filter(r => {
+    if (fRegion && r.region.indexOf(fRegion) === -1) return false;
+    if (fRating && r.rating < fRating) return false;
+    if (!includeInactive && /leave/i.test(r.notes || '')) return false;
+    return true;
+  });
+
+  respMarkerLayer.clearLayers();
+  if (showResp) {
+    filteredResp.forEach(r => {
+      if (isNaN(r.lat) || isNaN(r.lng)) return;
+      const isLead = /Lead|Manager|SDM/i.test(r.region || '') || /Manager|Director|SDM/i.test(r.title || '');
+      const isInactive = /leave/i.test(r.notes || '');
+      const icon = L.divIcon({
+        className: 'resp-marker' + (isLead ? ' lead' : '') + (isInactive ? ' inactive' : ''),
+        iconSize: [isLead ? 14 : 11, isLead ? 14 : 11],
+        iconAnchor: [isLead ? 7 : 5.5, isLead ? 7 : 5.5]
+      });
+      const marker = L.marker([r.lat, r.lng], { icon: icon });
+      marker.bindPopup(buildRespPopup(r), { maxWidth: 280 });
+      marker.addTo(respMarkerLayer);
+    });
+  }
+
+  // Stats
+  document.getElementById('stat-wos').textContent = filteredWOs.length;
+  document.getElementById('stat-cities').textContent = cities.length;
+  document.getElementById('stat-resp').textContent = filteredResp.filter(r => !/leave/i.test(r.notes || '')).length;
+  document.getElementById('stat-states').textContent = new Set(cities.map(c => c.state)).size;
+
+  // Top hotspots
+  document.getElementById('hotspots-list').innerHTML = cities.slice(0, 10).map(c =>
+    `<div class="row"><span class="count">${c.wos.length}</span><span class="where">${escapeHtml(c.city)}, ${escapeHtml(c.state)}</span></div>`
+  ).join('') || '<div class="gap-note">No matches</div>';
+
+  // Coverage gaps
+  const activeResp = filteredResp.filter(r => !/leave/i.test(r.notes || '') && !isNaN(r.lat) && !isNaN(r.lng));
+  const gaps = cities.filter(c =>
+    !activeResp.some(r => distMiles(c.lat, c.lng, r.lat, r.lng) < COVERAGE_RADIUS_MI)
+  ).slice(0, 15);
+  document.getElementById('gaps-list').innerHTML = gaps.length > 0
+    ? gaps.map(c => `<div class="row"><span class="count">${c.wos.length}</span><span class="where">${escapeHtml(c.city)}, ${escapeHtml(c.state)}</span></div>`).join('')
+    : '<div class="gap-note">No gaps with current filters.</div>';
+}
+
+// ============================================================
+// Helpers
+// ============================================================
+function buildWoPopup(c) {
+  const items = c.wos.slice(0, 6).map(w => `<li><b>WO ${escapeHtml(w.wo)}</b> · ${escapeHtml(w.start)}<br><span class="sub">${escapeHtml((w.name || '').substring(0, 100))}</span></li>`).join('');
+  const more = c.wos.length > 6 ? `<div class="sub">+ ${c.wos.length - 6} more</div>` : '';
+  return `<h4>${escapeHtml(c.city)}, ${escapeHtml(c.state)} — ${c.wos.length} WO${c.wos.length > 1 ? 's' : ''}</h4><ul>${items}</ul>${more}`;
+}
+
+function buildRespPopup(r) {
+  const bits = [r.title, 'Region ' + r.region, 'Rating ' + r.rating, r.bilingual ? 'Bilingual' : null]
+    .filter(Boolean).map(escapeHtml).join(' · ');
+  return `<h4>${escapeHtml(r.name)}</h4><div class="sub">${escapeHtml(r.state)}</div><div>${bits}</div>${r.notes ? `<div class="sub" style="margin-top:4px;font-style:italic">${escapeHtml(r.notes)}</div>` : ''}`;
+}
+
+function distMiles(lat1, lng1, lat2, lng2) {
+  const R = 3959, toRad = d => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1), dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.asin(Math.sqrt(a));
+}
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+}
+
+function buildMetaText() {
+  const upd = metaData['updated_at'] || '(unknown)';
+  return 'Window: today → +120 days · Sheet last synced: ' + upd;
+}
+
+function setStatus(msg) { document.getElementById('status').textContent = msg; }
+
+// ============================================================
+// Go
+// ============================================================
+initMap();
+bindControls();
+loadAll();
+</script>
+</body>
+</html>

@@ -425,8 +425,11 @@ async function loadAll() {
     const [woRows, respRows, metaRows] = await Promise.all([
       fetchCsv(gvizCsv(WO_FEED_TAB)),
       // MASTER has IDENTIFICATION/CONTACT/etc category labels on row 1, real headers on row 2.
-      // range=A2:Z skips the category row so the field names become headers.
-      fetchCsv(gvizCsv(RESPONDER_TAB, RESPONDER_TAB === 'MASTER' ? 'A2:Z' : undefined)),
+      // Range A2:U skips the category row AND stops at the last real column ("Flags").
+      // (A2:Z used to be the range, but trailing empty header cells V-Z confused PapaParse —
+      // it tried to dedupe duplicate "" headers with _1/_2/.. suffixes and ate the first
+      // data row into a malformed column name, dropping Allison, Terri silently.)
+      fetchCsv(gvizCsv(RESPONDER_TAB, RESPONDER_TAB === 'MASTER' ? 'A2:U' : undefined)),
       fetchCsv(gvizCsv(META_TAB)).catch(() => [])
     ]);
 

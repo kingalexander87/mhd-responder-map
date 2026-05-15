@@ -46,6 +46,9 @@ aside .panel:last-child { border-bottom: none; }
 .row:last-child { border-bottom: none; }
 .count { font-weight: 600; color: var(--accent); min-width: 26px; text-align: right; }
 .where { flex: 1; padding-left: 8px; color: #333; }
+.svc-supply { color: #666; font-size: 11px; min-width: 70px; text-align: right; }
+.svc-supply.stretched { color: #d97706; font-weight: 600; }
+.svc-supply.gap { color: var(--accent); font-weight: 600; }
 .gap-note { color: var(--muted); font-size: 11px; padding-top: 4px; font-style: italic; }
 .legend { display: flex; gap: 14px; font-size: 12px; align-items: center; }
 .legend-item { display: flex; align-items: center; gap: 5px; }
@@ -86,6 +89,18 @@ aside .panel:last-child { border-bottom: none; }
   <div id="map"></div>
   <aside>
     <div class="panel">
+      <h3>Search</h3>
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;">
+        <input id="zip-search" type="text" inputmode="numeric" placeholder="ZIP code" maxlength="5"
+               style="flex:1;font-size:13px;padding:4px 8px;border:1px solid #d0d0d0;border-radius:4px;">
+        <button id="zip-go" style="font-size:12px;padding:4px 12px;border:1px solid #d0d0d0;background:#fff;border-radius:4px;cursor:pointer;">Go</button>
+      </div>
+      <input id="resp-search" type="text" list="resp-names" placeholder="Find responder by name…"
+             style="width:100%;font-size:13px;padding:4px 8px;border:1px solid #d0d0d0;border-radius:4px;box-sizing:border-box;">
+      <datalist id="resp-names"></datalist>
+      <button id="clear-search" style="display:none;margin-top:6px;font-size:11px;padding:3px 10px;border:1px solid #d0d0d0;background:#fff;border-radius:4px;cursor:pointer;">✕ Clear search</button>
+    </div>
+    <div class="panel">
       <h3>Filters</h3>
       <div class="controls" style="flex-direction:column;align-items:stretch;gap:6px;">
         <label>Service <select id="filter-service" style="margin-left:auto;"><option value="">All</option><option>Audio</option><option>ResFit</option><option>MEQ</option><option>Air</option><option>NLS</option><option>ENLS</option><option>Dosimetry</option></select></label>
@@ -113,6 +128,11 @@ aside .panel:last-child { border-bottom: none; }
       <div id="gaps-list"></div>
       <div class="gap-note">Cities with WOs and no active responder within 150 miles.</div>
     </div>
+    <div class="panel">
+      <h3>Service Coverage</h3>
+      <div id="service-coverage-list"></div>
+      <div class="gap-note">Upcoming WOs by service vs. active qualified responders. Ratio &gt;5 WOs per responder flagged as stretched.</div>
+    </div>
   </aside>
 </div>
 <div class="status" id="status">Initializing…</div>
@@ -128,9 +148,38 @@ const RESPONDER_TAB = 'MASTER'; // or 'MAPS EXPORT' depending on which is the cl
 const COVERAGE_RADIUS_MI = 150;
 
 // gviz CSV endpoint (works for any tab in a sheet that's set to "Anyone with the link can view")
-function gvizCsv(sheetName) {
-  return 'https://docs.google.com/spreadsheets/d/' + SHEET_ID +
-         '/gviz/tq?tqx=out:csv&sheet=' + encodeURIComponent(sheetName);
+// Optional `range` skips category-label rows. MASTER has IDENTIFICATION/CONTACT/etc on row 1
+// and real column names on row 2, so we use range=A2:Z for it.
+function gvizCsv(sheetName, range) {
+  let url = 'https://docs.google.com/spreadsheets/d/' + SHEET_ID +
+            '/gviz/tq?tqx=out:csv&sheet=' + encodeURIComponent(sheetName);
+  if (range) url += '&range=' + encodeURIComponent(range);
+  return url;
+}
+
+// Service taxonomy: the eight capabilities tracked on the MASTER sheet.
+const SERVICES = ['Audio', 'QN Fit Test', 'QL Fit Test', 'NIOSH/PFT Cert', 'Air Monitor', 'Dosimetry', 'NLS', 'ENLS'];
+
+// Detect which of the standard services a WO requires based on deal name + schedule summary.
+function detectWoServices(wo) {
+  const text = ((wo.name || '') + ' ' + (wo.summary || '')).toLowerCase();
+  const out = [];
+  if (/\baudio\b|audiometric/.test(text)) out.push('Audio');
+  if (/\bqn\b|quantitative/.test(text)) out.push('QN Fit Test');
+  if (/\bql\b|qualitative/.test(text)) out.push('QL Fit Test');
+  // Generic "respirator fit" or "fit test" without QN/QL → assume QN (most common)
+  if (out.indexOf('QN Fit Test') === -1 && out.indexOf('QL Fit Test') === -1 &&
+      /respirator fit|fit test/.test(text)) out.push('QN Fit Test');
+  if (/\bmeq\b|medical evaluation/.test(text)) out.push('NIOSH/PFT Cert');
+  if (/air monitor/.test(text)) out.push('Air Monitor');
+  if (/dosimet/.test(text)) out.push('Dosimetry');
+  if (/\benls\b|environmental noise/.test(text)) out.push('ENLS');
+  else if (/\bnls\b|noise level/.test(text)) out.push('NLS');
+  return out;
+}
+
+function yesVal(v) {
+  return (v == null ? '' : String(v)).trim().toLowerCase().startsWith('y');
 }
 
 // ============================================================
@@ -160,7 +209,9 @@ async function loadAll() {
   try {
     const [woRows, respRows, metaRows] = await Promise.all([
       fetchCsv(gvizCsv(WO_FEED_TAB)),
-      fetchCsv(gvizCsv(RESPONDER_TAB)),
+      // MASTER has IDENTIFICATION/CONTACT/etc category labels on row 1, real headers on row 2.
+      // range=A2:Z skips the category row so the field names become headers.
+      fetchCsv(gvizCsv(RESPONDER_TAB, RESPONDER_TAB === 'MASTER' ? 'A2:Z' : undefined)),
       fetchCsv(gvizCsv(META_TAB)).catch(() => [])
     ]);
 
@@ -185,13 +236,22 @@ async function loadAll() {
         state: r['Home State'] || '',
         title: r['Title'] || '',
         rating: parseInt(r['Svc Rating'] || r['Rating'] || '0', 10) || 0,
-        bilingual: (r['Bilingual'] || '').toLowerCase().startsWith('y'),
+        bilingual: yesVal(r['Bilingual']),
         notes: r['Notes / Idiosyncrasies'] || r['Notes'] || '',
         address: r['Address'] || '',
-        // We don't have lat/lng in MASTER; the responder map sheet typically resolves these client-side.
-        // For now we'll pass the address through; future work: bake lat/lng into a MASTER_GEO tab too.
         lat: parseFloat(r['Lat'] || ''),
-        lng: parseFloat(r['Lng'] || '')
+        lng: parseFloat(r['Lng'] || ''),
+        // Capabilities pulled directly from MASTER's "Yes"/blank columns
+        caps: {
+          'Audio': yesVal(r['Audio Certified']),
+          'QN Fit Test': yesVal(r['QN Fit Test']),
+          'QL Fit Test': yesVal(r['QL Fit Test']),
+          'NIOSH/PFT Cert': yesVal(r['NIOSH/PFT Cert']),
+          'Air Monitor': yesVal(r['Air Monitor']),
+          'Dosimetry': yesVal(r['Dosimetry']),
+          'NLS': yesVal(r['NLS']),
+          'ENLS': yesVal(r['ENLS'])
+        }
       }))
       .filter(r => r.name);
 
@@ -202,6 +262,7 @@ async function loadAll() {
     await ensureResponderCoords(respData);
 
     document.getElementById('meta').textContent = buildMetaText();
+    populateResponderDatalist();
     setStatus('Ready. ' + woData.length + ' WOs · ' + respData.length + ' responders.');
     redraw();
   } catch (e) {
@@ -264,6 +325,122 @@ function bindControls() {
     setStatus('Reloading…');
     loadAll();
   });
+
+  // ===== Search: ZIP code =====
+  const zipInput = document.getElementById('zip-search');
+  const zipGo = document.getElementById('zip-go');
+  zipGo.addEventListener('click', searchZip);
+  zipInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); searchZip(); } });
+
+  // ===== Search: Responder =====
+  const respInput = document.getElementById('resp-search');
+  respInput.addEventListener('change', searchResponder);
+  // Most browsers fire 'input' when a datalist option is clicked; check for exact name match.
+  respInput.addEventListener('input', () => {
+    const v = respInput.value.trim();
+    if (v && respData.some(r => r.name && r.name.toLowerCase() === v.toLowerCase())) {
+      searchResponder();
+    }
+  });
+
+  document.getElementById('clear-search').addEventListener('click', clearSearch);
+}
+
+// ===== Search helpers =====
+let searchMarker = null;
+
+function populateResponderDatalist() {
+  const dl = document.getElementById('resp-names');
+  // Sort by last name for browsing
+  const sorted = respData.slice().sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  dl.innerHTML = sorted.map(r => `<option value="${escapeHtml(r.name)}">`).join('');
+}
+
+async function searchZip() {
+  const zip = (document.getElementById('zip-search').value || '').trim();
+  if (!/^\d{5}$/.test(zip)) {
+    setStatus('Enter a 5-digit ZIP code.');
+    return;
+  }
+  setStatus('Looking up ZIP ' + zip + '…');
+  const cache = JSON.parse(localStorage.getItem('mhd_zip_cache') || '{}');
+  let geo = cache[zip];
+  if (!geo) {
+    try {
+      const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=us&postalcode=' + zip;
+      const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+      const data = await res.json();
+      if (!data || !data.length) {
+        setStatus('No location found for ZIP ' + zip + '.');
+        return;
+      }
+      geo = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+      cache[zip] = geo;
+      localStorage.setItem('mhd_zip_cache', JSON.stringify(cache));
+    } catch (e) {
+      setStatus('ZIP lookup failed: ' + (e.message || e));
+      return;
+    }
+  }
+  flyToWithMarker(geo.lat, geo.lng, 'ZIP ' + zip, 10);
+  reportNearby(geo.lat, geo.lng, 'ZIP ' + zip);
+}
+
+function searchResponder() {
+  const v = (document.getElementById('resp-search').value || '').trim();
+  if (!v) return;
+  const r = respData.find(x => x.name && x.name.toLowerCase() === v.toLowerCase());
+  if (!r) {
+    setStatus('No responder matching "' + v + '". Pick one from the suggestions.');
+    return;
+  }
+  if (isNaN(r.lat) || isNaN(r.lng)) {
+    setStatus(r.name + ' has no location yet. Wait for geocoding to finish, then try again.');
+    return;
+  }
+  flyToWithMarker(r.lat, r.lng, r.name, 9);
+  // Open the responder's own popup after the fly animation
+  setTimeout(() => {
+    respMarkerLayer.eachLayer(m => {
+      const ll = m.getLatLng();
+      if (Math.abs(ll.lat - r.lat) < 0.001 && Math.abs(ll.lng - r.lng) < 0.001) {
+        m.openPopup();
+      }
+    });
+  }, 700);
+}
+
+function flyToWithMarker(lat, lng, label, zoom) {
+  if (searchMarker) map.removeLayer(searchMarker);
+  searchMarker = L.marker([lat, lng], {
+    icon: L.divIcon({
+      className: '',
+      html: '<div style="background:#222;color:#fff;padding:3px 9px;border-radius:3px;font-size:11px;font-weight:500;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.3);">' + escapeHtml(label) + '</div>',
+      iconSize: [120, 22],
+      iconAnchor: [10, 11]
+    }),
+    keyboard: false,
+    interactive: false
+  }).addTo(map);
+  map.flyTo([lat, lng], zoom || 9, { duration: 0.8 });
+  document.getElementById('clear-search').style.display = '';
+  setStatus('Showing ' + label);
+}
+
+function reportNearby(lat, lng, label) {
+  // Count nearby WOs and responders within 50 miles of the search point
+  const nearWOs = woData.filter(w => !isNaN(w.lat) && distMiles(lat, lng, w.lat, w.lng) < 50).length;
+  const nearResp = respData.filter(r => !isNaN(r.lat) && !/leave/i.test(r.notes || '') && distMiles(lat, lng, r.lat, r.lng) < 50).length;
+  setStatus(label + ' — ' + nearWOs + ' WO' + (nearWOs === 1 ? '' : 's') + ' and ' + nearResp + ' active responder' + (nearResp === 1 ? '' : 's') + ' within 50 mi.');
+}
+
+function clearSearch() {
+  if (searchMarker) { map.removeLayer(searchMarker); searchMarker = null; }
+  document.getElementById('zip-search').value = '';
+  document.getElementById('resp-search').value = '';
+  document.getElementById('clear-search').style.display = 'none';
+  map.flyTo([39.5, -98.35], 4, { duration: 0.6 });
+  setStatus('Cleared search. ' + woData.length + ' WOs · ' + respData.length + ' responders.');
 }
 
 function redraw() {
@@ -350,13 +527,50 @@ function redraw() {
   document.getElementById('gaps-list').innerHTML = gaps.length > 0
     ? gaps.map(c => `<div class="row"><span class="count">${c.wos.length}</span><span class="where">${escapeHtml(c.city)}, ${escapeHtml(c.state)}</span></div>`).join('')
     : '<div class="gap-note">No gaps with current filters.</div>';
+
+  // ===== Service Coverage =====
+  // For each service: count upcoming WOs requiring it, and count active responders qualified for it.
+  // Uses the *unfiltered* WO list (we want demand totals regardless of UI service filter) and
+  // the *region/rating-filtered* responders so the comparison respects who's in scope.
+  const allUpcomingWOs = woData.filter(w => {
+    if (!fService) return true;
+    const t = ((w.name || '') + ' ' + (w.summary || '')).toLowerCase();
+    return t.indexOf(fService) !== -1;
+  });
+  const activeQualifiedBase = filteredResp.filter(r => !/leave/i.test(r.notes || ''));
+  const coverage = SERVICES.map(svc => {
+    let woCount = 0;
+    allUpcomingWOs.forEach(w => { if (detectWoServices(w).indexOf(svc) !== -1) woCount++; });
+    const qualifiedCount = activeQualifiedBase.filter(r => r.caps && r.caps[svc]).length;
+    return { svc: svc, wos: woCount, resp: qualifiedCount };
+  }).filter(c => c.wos > 0 || c.resp > 0);
+
+  document.getElementById('service-coverage-list').innerHTML = coverage.length > 0
+    ? coverage.map(c => {
+        let supplyCls = '';
+        let label = c.resp + ' resp';
+        if (c.wos > 0 && c.resp === 0) { supplyCls = 'gap'; label = '0 resp ⚠'; }
+        else if (c.resp > 0 && c.wos / c.resp > 5) { supplyCls = 'stretched'; label = c.resp + ' resp (stretched)'; }
+        return `<div class="row"><span class="count">${c.wos}</span><span class="where">${escapeHtml(c.svc)}</span><span class="svc-supply ${supplyCls}">${label}</span></div>`;
+      }).join('')
+    : '<div class="gap-note">No service data.</div>';
 }
 
 // ============================================================
 // Helpers
 // ============================================================
+function extractZip(address) {
+  if (!address) return '';
+  const m = address.match(/(\d{5})(?:-\d{4})?\s*$/);
+  return m ? m[1] : '';
+}
+
 function buildWoPopup(c) {
-  const items = c.wos.slice(0, 6).map(w => `<li><b>WO ${escapeHtml(w.wo)}</b> · ${escapeHtml(w.start)}<br><span class="sub">${escapeHtml((w.name || '').substring(0, 100))}</span></li>`).join('');
+  const items = c.wos.slice(0, 6).map(w => {
+    const zip = extractZip(w.address);
+    const zipBit = zip ? ` · <span style="color:#666">ZIP ${zip}</span>` : '';
+    return `<li><b>WO ${escapeHtml(w.wo)}</b> · ${escapeHtml(w.start)}${zipBit}<br><span class="sub">${escapeHtml((w.name || '').substring(0, 100))}</span></li>`;
+  }).join('');
   const more = c.wos.length > 6 ? `<div class="sub">+ ${c.wos.length - 6} more</div>` : '';
   return `<h4>${escapeHtml(c.city)}, ${escapeHtml(c.state)} — ${c.wos.length} WO${c.wos.length > 1 ? 's' : ''}</h4><ul>${items}</ul>${more}`;
 }
@@ -364,7 +578,11 @@ function buildWoPopup(c) {
 function buildRespPopup(r) {
   const bits = [r.title, 'Region ' + r.region, 'Rating ' + r.rating, r.bilingual ? 'Bilingual' : null]
     .filter(Boolean).map(escapeHtml).join(' · ');
-  return `<h4>${escapeHtml(r.name)}</h4><div class="sub">${escapeHtml(r.state)}</div><div>${bits}</div>${r.notes ? `<div class="sub" style="margin-top:4px;font-style:italic">${escapeHtml(r.notes)}</div>` : ''}`;
+  const certs = r.caps ? SERVICES.filter(s => r.caps[s]) : [];
+  const capsLine = certs.length > 0
+    ? `<div style="margin-top:4px;"><b style="font-size:11px;color:#444;">Certified:</b> <span class="sub">${certs.map(escapeHtml).join(', ')}</span></div>`
+    : '<div class="sub" style="margin-top:4px;">No capabilities listed.</div>';
+  return `<h4>${escapeHtml(r.name)}</h4><div class="sub">${escapeHtml(r.state)}</div><div>${bits}</div>${capsLine}${r.notes ? `<div class="sub" style="margin-top:4px;font-style:italic">${escapeHtml(r.notes)}</div>` : ''}`;
 }
 
 function distMiles(lat1, lng1, lat2, lng2) {

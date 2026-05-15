@@ -157,7 +157,7 @@ aside .panel:last-child { margin-bottom: 0; }
     <div class="panel">
       <h3>Service Coverage</h3>
       <div id="service-coverage-list"></div>
-      <div class="gap-note">Upcoming WOs by service vs. active qualified responders. Ratio &gt;5 WOs per responder flagged as stretched.</div>
+      <div class="gap-note">Left number = upcoming WOs needing that service. Right number = schedulable responders qualified for it (excludes managers/SDM and on-leave). Ratio &gt;5 WOs per responder flagged as "stretched".</div>
     </div>
   </aside>
 </div>
@@ -281,6 +281,20 @@ function detectWoServices(wo) {
 
 function yesVal(v) {
   return (v == null ? '' : String(v)).trim().toLowerCase().startsWith('y');
+}
+
+// Responder classification helpers — used in stats + Service Coverage so that
+// counts reflect only people who actually get scheduled on jobs.
+// Regional Managers and the SDM (pink markers) are visible on the map but are
+// NOT counted in "Active responders" or "qualified responders" coverage figures.
+function isLeadResp(r) {
+  return /Lead|Manager|SDM/i.test(r.region || '') || /Manager|Director|SDM/i.test(r.title || '');
+}
+function isOnLeave(r) {
+  return /leave/i.test(r.notes || '');
+}
+function isSchedulable(r) {
+  return !isOnLeave(r) && !isLeadResp(r);
 }
 
 // ============================================================
@@ -637,24 +651,26 @@ function redraw() {
   respInactiveLayer.clearLayers();
   filteredResp.forEach(r => {
     if (isNaN(r.lat) || isNaN(r.lng)) return;
-    const isLead = /Lead|Manager|SDM/i.test(r.region || '') || /Manager|Director|SDM/i.test(r.title || '');
-    const isInactive = /leave/i.test(r.notes || '');
+    const lead = isLeadResp(r);
+    const inactive = isOnLeave(r);
     const icon = L.divIcon({
-      className: 'resp-marker' + (isLead ? ' lead' : '') + (isInactive ? ' inactive' : ''),
-      iconSize: [isLead ? 16 : 11, isLead ? 16 : 11],
-      iconAnchor: [isLead ? 8 : 5.5, isLead ? 8 : 5.5]
+      className: 'resp-marker' + (lead ? ' lead' : '') + (inactive ? ' inactive' : ''),
+      iconSize: [lead ? 16 : 11, lead ? 16 : 11],
+      iconAnchor: [lead ? 8 : 5.5, lead ? 8 : 5.5]
     });
     const marker = L.marker([r.lat, r.lng], { icon: icon });
     marker.bindPopup(buildRespPopup(r), { maxWidth: 280 });
-    if (isInactive) marker.addTo(respInactiveLayer);
-    else if (isLead) marker.addTo(respLeadLayer);
+    if (inactive) marker.addTo(respInactiveLayer);
+    else if (lead) marker.addTo(respLeadLayer);
     else marker.addTo(respActiveLayer);
   });
 
   // Stats
   document.getElementById('stat-wos').textContent = filteredWOs.length;
   document.getElementById('stat-cities').textContent = cities.length;
-  document.getElementById('stat-resp').textContent = filteredResp.filter(r => !/leave/i.test(r.notes || '')).length;
+  // Active responders = schedulable only (excludes managers, SDM, on-leave).
+  // Managers/SDM remain visible on the map as pink markers.
+  document.getElementById('stat-resp').textContent = filteredResp.filter(isSchedulable).length;
   document.getElementById('stat-states').textContent = new Set(cities.map(c => c.state)).size;
 
   // ===== Aggregate by county + state (used for both Hotspots and Coverage Gaps panels) =====
@@ -724,7 +740,8 @@ function redraw() {
     if (fRating && r.rating < fRating) return false;
     return true;
   });
-  const activeQualifiedBase = respForCoverage.filter(r => !/leave/i.test(r.notes || ''));
+  // Qualified-responder count for each service excludes managers/SDM (we don't schedule them).
+  const activeQualifiedBase = respForCoverage.filter(isSchedulable);
   const coverage = SERVICES.map(svc => {
     let woCount = 0;
     allUpcomingWOs.forEach(w => { if (detectWoServices(w).indexOf(svc) !== -1) woCount++; });

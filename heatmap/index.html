@@ -155,6 +155,14 @@ aside .panel:last-child { margin-bottom: 0; }
       <div class="gap-note">Uncovered WOs (no active responder within 150 mi), aggregated by county and state.</div>
     </div>
     <div class="panel">
+      <h3>Responder Workload</h3>
+      <div class="sub-label">5 busiest</div>
+      <div id="busy-list"></div>
+      <div class="sub-label" style="margin-top:10px;">5 slowest</div>
+      <div id="slow-list"></div>
+      <div class="gap-note">WOs assigned per schedulable responder within current filters. Excludes managers/SDM and on-leave. Names matched between HubSpot deals and the MASTER sheet.</div>
+    </div>
+    <div class="panel">
       <h3>Service Coverage</h3>
       <div id="service-coverage-list"></div>
       <div class="gap-note">Left number = upcoming WOs needing that service. Right number = schedulable responders qualified for it (excludes managers/SDM and on-leave). Ratio &gt;5 WOs per responder flagged as "stretched".</div>
@@ -295,6 +303,54 @@ function isOnLeave(r) {
 }
 function isSchedulable(r) {
   return !isOnLeave(r) && !isLeadResp(r);
+}
+
+// Nickname / spelling aliases — both sides normalized to "first last" lowercase.
+// Confirmed by Alex 2026-05-15 (heat-map session). Add new pairs here if more pop up.
+// NOTE: "timothy kelley" → "tim kelly" assumes same person despite last-name spelling
+// difference (Kelley vs Kelly). Worth fixing in HubSpot or MASTER for consistency.
+const RESPONDER_ALIASES = {
+  'robert gilling':   'bob gilling',
+  'bradley kearns':   'brad kearns',
+  'timothy kelley':   'tim kelly',
+  'steven mills':     'steve mills',
+  'donald monteau':   'don monteau',
+  'robert staycoff':  'rob staycoff',
+  'mike flaherty':    'michael flaherty',
+  'anthony phillips': 'tony phillips'
+};
+
+// Responders whose WO assignments should be flagged for reassignment rather than
+// counted in the Responder Workload panel. Keys are HubSpot's spellings, lowercased.
+// Confirmed by Alex 2026-05-15.
+const RESPONDER_FLAGS = {
+  'kameron tracy':  'Sales — not a field responder. Reassign WO.',
+  'stephen brown':  'No longer employed by MHD. Reassign WO.',
+  'ronald denmon':  'No longer employed by MHD. Reassign WO.'
+};
+
+// Normalize a responder name for matching across HubSpot deals ↔ MASTER sheet.
+// HubSpot stores "First Last"; MASTER stores "Last, First". We flip to "First Last",
+// lowercase, collapse whitespace, then apply any nickname alias.
+function normRespName(s) {
+  let str = String(s || '').trim();
+  if (str.indexOf(',') !== -1) {
+    const parts = str.split(',').map(p => p.trim());
+    if (parts.length === 2 && parts[1]) str = parts[1] + ' ' + parts[0];
+  }
+  const lower = str.toLowerCase().replace(/\s+/g, ' ');
+  return RESPONDER_ALIASES[lower] || lower;
+}
+
+// If any responder on a WO is on the flag list, return { name, reason }; else null.
+function findFlaggedResponder(rawValue) {
+  if (!rawValue) return null;
+  const parts = String(rawValue).split(/\s*[\/;]\s*/);
+  for (let i = 0; i < parts.length; i++) {
+    const lower = parts[i].trim().toLowerCase().replace(/\s+/g, ' ');
+    if (RESPONDER_FLAGS[lower]) return { name: parts[i].trim(), reason: RESPONDER_FLAGS[lower] };
+  }
+  return null;
 }
 
 // ============================================================
@@ -725,6 +781,39 @@ function redraw() {
     ? topGapStates.map(s => `<div class="row"><span class="count">${s.n}</span><span class="where">${escapeHtml(s.state)}</span></div>`).join('')
     : '<div class="gap-note">No gaps with current filters.</div>';
 
+  // ===== Responder Workload (busiest / slowest) =====
+  // WO counts per schedulable responder, matched by normalized name between the
+  // WO row's `responder` field and the MASTER roster. Slowest list intentionally
+  // includes 0-WO responders so we surface under-utilization.
+  const respCounts = new Map();   // normName → { name: displayName, n: woCount }
+  filteredResp.filter(isSchedulable).forEach(r => {
+    if (!r.name) return;
+    respCounts.set(normRespName(r.name), { name: r.name, n: 0 });
+  });
+  filteredWOs.forEach(w => {
+    if (!w.responder) return;
+    // Apps Script joins multi-responder values with " / "; older rows may have ";".
+    w.responder.split(/\s*[\/;]\s*/).forEach(part => {
+      const key = normRespName(part);
+      if (!key) return;
+      const entry = respCounts.get(key);
+      if (entry) entry.n++;
+    });
+  });
+  const respList = Array.from(respCounts.values());
+  const busiest = respList.slice()
+    .sort((a, b) => b.n - a.n || a.name.localeCompare(b.name))
+    .slice(0, 5);
+  const slowest = respList.slice()
+    .sort((a, b) => a.n - b.n || a.name.localeCompare(b.name))
+    .slice(0, 5);
+  document.getElementById('busy-list').innerHTML = busiest.length > 0
+    ? busiest.map(r => `<div class="row"><span class="count">${r.n}</span><span class="where">${escapeHtml(r.name)}</span></div>`).join('')
+    : '<div class="gap-note">No responders match current filters.</div>';
+  document.getElementById('slow-list').innerHTML = slowest.length > 0
+    ? slowest.map(r => `<div class="row"><span class="count">${r.n}</span><span class="where">${escapeHtml(r.name)}</span></div>`).join('')
+    : '<div class="gap-note">No responders match current filters.</div>';
+
   // ===== Service Coverage =====
   // For each service: count upcoming WOs requiring it, and count active responders qualified for it.
   // Deliberately ignores the Service dropdown (we want the panel to keep showing ALL services even
@@ -777,9 +866,14 @@ function buildWoPopup(c) {
     const woLabel = w.dealUrl
       ? `<a href="${escapeHtml(w.dealUrl)}" target="_blank" rel="noopener" style="color:#b91c1c;text-decoration:none;font-weight:600;">WO ${escapeHtml(w.wo)} ↗</a>`
       : `<b>WO ${escapeHtml(w.wo)}</b>`;
-    const respBit = w.responder
-      ? `<div style="margin-top:2px;font-size:12px;"><b style="color:#374151;">Responder:</b> <span style="color:#1f2937;">${escapeHtml(w.responder)}</span></div>`
-      : '';
+    // If the assigned responder is flagged (sales / ex-employee), render a red callout
+    // so Alex can spot it and reassign instead of a plain Responder line.
+    const flag = findFlaggedResponder(w.responder);
+    const respBit = !w.responder
+      ? ''
+      : (flag
+          ? `<div style="margin-top:3px;font-size:12px;background:#fef2f2;border-left:3px solid #b91c1c;padding:4px 8px;border-radius:3px;"><b style="color:#b91c1c;">⚠ Reassign:</b> ${escapeHtml(w.responder)}<div style="color:#7a0d05;font-size:11px;margin-top:1px;">${escapeHtml(flag.reason)}</div></div>`
+          : `<div style="margin-top:2px;font-size:12px;"><b style="color:#374151;">Responder:</b> <span style="color:#1f2937;">${escapeHtml(w.responder)}</span></div>`);
     // Confirmed Schedule Summary — capped for popup readability.
     const sumText = (w.summary || '').trim();
     const sumBit = sumText

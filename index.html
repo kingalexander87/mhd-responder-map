@@ -60,6 +60,8 @@ input:checked+.slider:before{transform:translateX(16px)}
 .dd-name{font-weight:700;color:#1F3864;font-size:12px}
 .dd-detail{color:#666;font-size:10px;margin-top:1px}
 .dd-empty{padding:10px 11px;color:#999;font-size:11px;font-style:italic}
+.zip-directions{display:inline-block;background:#27AE60;color:#fff;padding:2px 8px;border-radius:4px;text-decoration:none;font-weight:700;font-size:10px;margin-top:4px;letter-spacing:0.3px}
+.zip-directions:hover{background:#1E8449}
 </style>
 </head>
 <body>
@@ -273,6 +275,7 @@ function makeMarker(tech){
       ${tech.phone?`<div style="margin-bottom:2px">&#128222; <a href="tel:${tech.phone}" style="color:#1F3864">${tech.phone}</a></div>`:''}
       ${tech.email?`<div style="margin-bottom:5px;word-break:break-all">&#9993; <a href="mailto:${tech.email}" style="color:#1F3864">${tech.email}</a></div>`:''}
       ${tech.address?`<div style="margin-bottom:5px;color:#666;font-size:11px">&#128205; ${tech.address}</div>`:''}
+      <div style="margin-bottom:6px"><a href="${directionsURL(tech)}" target="_blank" rel="noopener" style="display:inline-block;background:#27AE60;color:#fff;padding:4px 10px;border-radius:4px;text-decoration:none;font-weight:700;font-size:11px">&#129517; Get Directions</a></div>
       <div>${servicesBadges}${bilingualBadge}</div>
       ${tech.audExp&&tech.audExp!=="Active"?`<div style="font-size:10px;color:#888;margin-top:4px">Audio exp: ${tech.audExp}</div>`:''}
       ${tech.nioshExp&&tech.nioshExp!=="Active"?`<div style="font-size:10px;color:#888">NIOSH exp: ${tech.nioshExp}</div>`:''}
@@ -319,6 +322,11 @@ function haversine(lat1,lng1,lat2,lng2){
 function clearSearchMarker(){
   if(searchMarker){ searchMarker.setMap(null); searchMarker=null; }
   if(searchInfoWindow){ searchInfoWindow.close(); searchInfoWindow=null; }
+}
+function directionsURL(tech){
+  const coords=COORDS[tech.name];
+  const dest=tech.address?tech.address:(coords?`${coords.lat},${coords.lng}`:tech.name);
+  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(dest)}`;
 }
 function showNameDropdown(){
   const q=document.getElementById('search').value.toLowerCase().trim();
@@ -417,6 +425,7 @@ async function findNearest(){
         <div class="zip-detail">${t.title} &middot; Rating ${t.rating}/7 &middot; ${t.region}</div>
         <div class="zip-detail">${t.phone||'No phone on file'}</div>
         <div>${t.services.slice(0,4).map(s=>`<span class="badge">${s}</span>`).join('')}${t.services.length>4?`<span class="badge">+${t.services.length-4}</span>`:''}${isInactive(t)?`<span class="badge inactive-badge">On Leave</span>`:''}</div>
+        <div><a class="zip-directions" href="${directionsURL(t)}" target="_blank" rel="noopener">&#129517; Get Directions</a></div>
       </div>`;}).join('');
     document.getElementById('zip-results').style.display='block';
     map.setZoom(7);

@@ -126,6 +126,7 @@ aside .panel:last-child { margin-bottom: 0; }
         <label>Service <select id="filter-service" style="margin-left:auto;"><option value="">All</option><option>Audio</option><option>ResFit</option><option>MEQ</option><option>Air</option><option>NLS</option><option>ENLS</option><option>Dosimetry</option></select></label>
         <label>Responder region <select id="filter-region" style="margin-left:auto;"><option value="">All</option><option value="NE">NE</option><option value="SE">SE</option><option value="W">W</option><option value="C">C</option></select></label>
         <label>Min responder rating <select id="filter-rating" style="margin-left:auto;"><option value="0">Any</option><option value="6">6+</option><option value="7">7+</option><option value="8">8+</option><option value="9">9</option></select></label>
+        <label>Date window <select id="filter-days" style="margin-left:auto;"><option value="30">Next 30 days</option><option value="60">Next 60 days</option><option value="90">Next 90 days</option><option value="120" selected>Next 120 days</option><option value="180">Next 180 days</option><option value="365">Next 365 days</option></select></label>
         <div class="gap-note" style="margin-top:4px;">Toggle layers on/off using the panel in the top-right of the map.</div>
         <button id="reload-btn" style="margin-top:6px;">Reload data</button>
       </div>
@@ -242,6 +243,15 @@ function woInRegion(wo, region) {
   if (!region) return true;
   const st = (wo.state || '').toUpperCase().trim();
   return stateToRegion[st] === region;
+}
+
+// HubSpot date properties can come through as epoch ms (string of digits) or ISO date strings.
+function parseWoDate(s) {
+  if (!s) return null;
+  const str = String(s).trim();
+  if (/^\d+$/.test(str)) return new Date(parseInt(str, 10));
+  const d = new Date(str);
+  return isNaN(d.getTime()) ? null : d;
 }
 
 // Detect which of the standard services a WO requires based on deal name + schedule summary.
@@ -433,7 +443,7 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 // Filters & redraw
 // ============================================================
 function bindControls() {
-  ['filter-service', 'filter-region', 'filter-rating']
+  ['filter-service', 'filter-region', 'filter-rating', 'filter-days']
     .forEach(id => document.getElementById(id).addEventListener('change', redraw));
   document.getElementById('reload-btn').addEventListener('click', () => {
     setStatus('Reloading…');
@@ -563,14 +573,23 @@ function redraw() {
   const fService = document.getElementById('filter-service').value;
   const fRegion = document.getElementById('filter-region').value;
   const fRating = parseInt(document.getElementById('filter-rating').value, 10) || 0;
+  const fDays = parseInt(document.getElementById('filter-days').value, 10) || 120;
 
-  // WOs now respect BOTH the service AND region filters so the heat + hotspots match what
-  // responders below are being filtered to.
+  // Date window: today → today + fDays. WOs without a parseable date are kept (safer than dropping).
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const cutoff = new Date(today.getTime() + fDays * 86400000);
+
+  // WOs respect service + region + date-window so the heat + hotspots match the responder view.
   const filteredWOs = woData.filter(w => {
     if (fService && !woNeedsService(w, fService)) return false;
     if (fRegion && !woInRegion(w, fRegion)) return false;
+    const d = parseWoDate(w.start);
+    if (d && (d < today || d > cutoff)) return false;
     return true;
   });
+
+  // Update header subtitle so it reflects the current window
+  document.getElementById('meta').textContent = buildMetaText(fDays);
 
   // Aggregate WOs by city for hotspots + heat intensity
   const byCity = {};
@@ -646,7 +665,12 @@ function redraw() {
   // For each service: count upcoming WOs requiring it, and count active responders qualified for it.
   // Deliberately ignores the Service dropdown (we want the panel to keep showing ALL services even
   // when one is selected) but still respects Region + Rating so the picture matches the scope.
-  const allUpcomingWOs = woData.filter(w => !fRegion || woInRegion(w, fRegion));
+  const allUpcomingWOs = woData.filter(w => {
+    if (fRegion && !woInRegion(w, fRegion)) return false;
+    const d = parseWoDate(w.start);
+    if (d && (d < today || d > cutoff)) return false;
+    return true;
+  });
   const respForCoverage = respData.filter(r => {
     if (fRegion && r.region.indexOf(fRegion) === -1) return false;
     if (fRating && r.rating < fRating) return false;
@@ -711,9 +735,10 @@ function escapeHtml(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
 }
 
-function buildMetaText() {
+function buildMetaText(days) {
   const upd = metaData['updated_at'] || '(unknown)';
-  return 'Window: today → +120 days · Sheet last synced: ' + upd;
+  const d = days || 120;
+  return 'Window: today → +' + d + ' days · Sheet last synced: ' + upd;
 }
 
 function setStatus(msg) { document.getElementById('status').textContent = msg; }

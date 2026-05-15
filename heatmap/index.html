@@ -178,6 +178,72 @@ function gvizCsv(sheetName, range) {
 // Service taxonomy: the eight capabilities tracked on the MASTER sheet.
 const SERVICES = ['Audio', 'QN Fit Test', 'QL Fit Test', 'NIOSH/PFT Cert', 'Air Monitor', 'Dosimetry', 'NLS', 'ENLS'];
 
+// Maps the Service dropdown value to (a) responder capability columns on MASTER and
+// (b) the canonical service names detectWoServices() returns. This is what lets the
+// Service filter narrow both responders AND work orders to the same service.
+const SERVICE_FILTER_MAP = {
+  'Audio':     { capKeys: ['Audio'],                       detected: ['Audio'] },
+  'ResFit':    { capKeys: ['QN Fit Test', 'QL Fit Test'],  detected: ['QN Fit Test', 'QL Fit Test'] },
+  'MEQ':       { capKeys: ['NIOSH/PFT Cert'],              detected: ['NIOSH/PFT Cert'] },
+  'Air':       { capKeys: ['Air Monitor'],                 detected: ['Air Monitor'] },
+  'NLS':       { capKeys: ['NLS'],                         detected: ['NLS'] },
+  'ENLS':      { capKeys: ['ENLS'],                        detected: ['ENLS'] },
+  'Dosimetry': { capKeys: ['Dosimetry'],                   detected: ['Dosimetry'] }
+};
+
+function woNeedsService(wo, filterKey) {
+  const m = SERVICE_FILTER_MAP[filterKey];
+  if (!m) return true;
+  const detected = detectWoServices(wo);
+  return m.detected.some(d => detected.indexOf(d) !== -1);
+}
+
+function respHasService(resp, filterKey) {
+  const m = SERVICE_FILTER_MAP[filterKey];
+  if (!m || !resp.caps) return true;
+  return m.capKeys.some(k => resp.caps[k]);
+}
+
+// Region filter: WOs have a State but no Region column. We map state → region using
+// the actual home-state assignments of responders in each region (so MHD's real cuts
+// win), with a US-Census-style fallback for states where no responder lives.
+const REGION_DEFAULTS = {
+  CT:'NE', ME:'NE', MA:'NE', NH:'NE', NJ:'NE', NY:'NE', PA:'NE', RI:'NE', VT:'NE',
+  AL:'SE', AR:'SE', DC:'SE', DE:'SE', FL:'SE', GA:'SE', KY:'SE', LA:'SE', MD:'SE',
+  MS:'SE', NC:'SE', SC:'SE', TN:'SE', VA:'SE', WV:'SE',
+  IL:'C',  IN:'C',  IA:'C',  KS:'C',  MI:'C',  MN:'C',  MO:'C',  NE:'C',  ND:'C',
+  OH:'C',  OK:'C',  SD:'C',  TX:'C',  WI:'C',
+  AK:'W',  AZ:'W',  CA:'W',  CO:'W',  HI:'W',  ID:'W',  MT:'W',  NV:'W',  NM:'W',
+  OR:'W',  UT:'W',  WA:'W',  WY:'W'
+};
+let stateToRegion = Object.assign({}, REGION_DEFAULTS);
+
+function buildStateRegionMap() {
+  stateToRegion = Object.assign({}, REGION_DEFAULTS);
+  const tally = {};
+  respData.forEach(r => {
+    const st = (r.state || '').toUpperCase().trim();
+    const rgRaw = (r.region || '').toUpperCase().trim();
+    if (!st || !rgRaw) return;
+    // Region cell may be e.g. "NE" or "NE Lead" — grab the leading region code.
+    const m = rgRaw.match(/^(NE|SE|W|C)\b/);
+    if (!m) return;
+    const rg = m[1];
+    tally[st] = tally[st] || {};
+    tally[st][rg] = (tally[st][rg] || 0) + 1;
+  });
+  Object.keys(tally).forEach(st => {
+    const best = Object.entries(tally[st]).sort((a, b) => b[1] - a[1])[0];
+    if (best) stateToRegion[st] = best[0];
+  });
+}
+
+function woInRegion(wo, region) {
+  if (!region) return true;
+  const st = (wo.state || '').toUpperCase().trim();
+  return stateToRegion[st] === region;
+}
+
 // Detect which of the standard services a WO requires based on deal name + schedule summary.
 function detectWoServices(wo) {
   const text = ((wo.name || '') + ' ' + (wo.summary || '')).toLowerCase();
@@ -305,6 +371,9 @@ async function loadAll() {
     // If responder rows lack lat/lng, geocode their addresses client-side using Nominatim
     // (one-time, cached in localStorage so reloads are instant).
     await ensureResponderCoords(respData);
+
+    // Now that respData is loaded, build the state→region map (used by WO region filter).
+    buildStateRegionMap();
 
     document.getElementById('meta').textContent = buildMetaText();
     populateResponderDatalist();
@@ -489,15 +558,18 @@ function clearSearch() {
 }
 
 function redraw() {
-  const fService = document.getElementById('filter-service').value.toLowerCase();
+  // Keep fService in its canonical case (e.g. "NLS") — the cap-key & detected-services lookups
+  // in SERVICE_FILTER_MAP / detectWoServices are case-sensitive.
+  const fService = document.getElementById('filter-service').value;
   const fRegion = document.getElementById('filter-region').value;
   const fRating = parseInt(document.getElementById('filter-rating').value, 10) || 0;
 
-  // Filter WOs by service text
+  // WOs now respect BOTH the service AND region filters so the heat + hotspots match what
+  // responders below are being filtered to.
   const filteredWOs = woData.filter(w => {
-    if (!fService) return true;
-    const t = ((w.name || '') + ' ' + (w.summary || '')).toLowerCase();
-    return t.includes(fService);
+    if (fService && !woNeedsService(w, fService)) return false;
+    if (fRegion && !woInRegion(w, fRegion)) return false;
+    return true;
   });
 
   // Aggregate WOs by city for hotspots + heat intensity
@@ -521,10 +593,12 @@ function redraw() {
     m.addTo(woMarkerLayer);
   });
 
-  // Responder filter (region + rating only — leave status is handled by layer toggle)
+  // Responder filter — region + rating + service capability.
+  // (Leave status is handled by the layer toggle, not here.)
   const filteredResp = respData.filter(r => {
     if (fRegion && r.region.indexOf(fRegion) === -1) return false;
     if (fRating && r.rating < fRating) return false;
+    if (fService && !respHasService(r, fService)) return false;
     return true;
   });
 
@@ -570,14 +644,15 @@ function redraw() {
 
   // ===== Service Coverage =====
   // For each service: count upcoming WOs requiring it, and count active responders qualified for it.
-  // Uses the *unfiltered* WO list (we want demand totals regardless of UI service filter) and
-  // the *region/rating-filtered* responders so the comparison respects who's in scope.
-  const allUpcomingWOs = woData.filter(w => {
-    if (!fService) return true;
-    const t = ((w.name || '') + ' ' + (w.summary || '')).toLowerCase();
-    return t.indexOf(fService) !== -1;
+  // Deliberately ignores the Service dropdown (we want the panel to keep showing ALL services even
+  // when one is selected) but still respects Region + Rating so the picture matches the scope.
+  const allUpcomingWOs = woData.filter(w => !fRegion || woInRegion(w, fRegion));
+  const respForCoverage = respData.filter(r => {
+    if (fRegion && r.region.indexOf(fRegion) === -1) return false;
+    if (fRating && r.rating < fRating) return false;
+    return true;
   });
-  const activeQualifiedBase = filteredResp.filter(r => !/leave/i.test(r.notes || ''));
+  const activeQualifiedBase = respForCoverage.filter(r => !/leave/i.test(r.notes || ''));
   const coverage = SERVICES.map(svc => {
     let woCount = 0;
     allUpcomingWOs.forEach(w => { if (detectWoServices(w).indexOf(svc) !== -1) woCount++; });

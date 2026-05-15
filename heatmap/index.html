@@ -81,6 +81,12 @@ aside .panel:last-child { margin-bottom: 0; }
 .leaflet-popup-content ul { margin: 4px 0 0; padding-left: 18px; }
 .leaflet-popup-content ul li { padding: 2px 0; }
 .leaflet-popup-tip { box-shadow: var(--shadow-sm); }
+.leaflet-control-layers { border-radius: 8px !important; border: 1px solid var(--border) !important; box-shadow: var(--shadow-md) !important; background: rgba(255,255,255,0.96) !important; padding: 4px !important; }
+.leaflet-control-layers-expanded { padding: 10px 12px !important; min-width: 200px; }
+.leaflet-control-layers-expanded label { display: flex !important; align-items: center; padding: 4px 0; font-size: 13px; color: var(--text); cursor: pointer; line-height: 1.4; }
+.leaflet-control-layers-expanded label:hover { color: #111827; }
+.leaflet-control-layers-expanded input[type="checkbox"] { margin-right: 8px; accent-color: var(--responder); }
+.leaflet-control-layers-overlays { padding-top: 4px; }
 </style>
 <link rel="preconnect" href="https://rsms.me/">
 <link rel="stylesheet" href="https://rsms.me/inter/inter.css">
@@ -120,10 +126,8 @@ aside .panel:last-child { margin-bottom: 0; }
         <label>Service <select id="filter-service" style="margin-left:auto;"><option value="">All</option><option>Audio</option><option>ResFit</option><option>MEQ</option><option>Air</option><option>NLS</option><option>ENLS</option><option>Dosimetry</option></select></label>
         <label>Responder region <select id="filter-region" style="margin-left:auto;"><option value="">All</option><option value="NE">NE</option><option value="SE">SE</option><option value="W">W</option><option value="C">C</option></select></label>
         <label>Min responder rating <select id="filter-rating" style="margin-left:auto;"><option value="0">Any</option><option value="6">6+</option><option value="7">7+</option><option value="8">8+</option><option value="9">9</option></select></label>
-        <label><input type="checkbox" id="toggle-wos" checked> Show work orders</label>
-        <label><input type="checkbox" id="toggle-resp" checked> Show responders</label>
-        <label><input type="checkbox" id="toggle-inactive"> Include responders on leave</label>
-        <button id="reload-btn">Reload data</button>
+        <div class="gap-note" style="margin-top:4px;">Toggle layers on/off using the panel in the top-right of the map.</div>
+        <button id="reload-btn" style="margin-top:6px;">Reload data</button>
       </div>
     </div>
     <div class="panel">
@@ -199,7 +203,8 @@ function yesVal(v) {
 // ============================================================
 // State
 // ============================================================
-let map, woHeatLayer, woMarkerLayer, respMarkerLayer;
+let map, woHeatLayer, woMarkerLayer;
+let respActiveLayer, respLeadLayer, respInactiveLayer;
 let woData = [], respData = [], metaData = {};
 
 // ============================================================
@@ -220,7 +225,28 @@ function initMap() {
     gradient: { 0.15: '#fee08b', 0.35: '#fdae61', 0.55: '#f46d43', 0.75: '#d73027', 1.0: '#a50026' }
   }).addTo(map);
   woMarkerLayer = L.layerGroup().addTo(map);
-  respMarkerLayer = L.layerGroup().addTo(map);
+
+  // Three separate responder layers so each can be toggled independently
+  respActiveLayer = L.layerGroup().addTo(map);
+  respLeadLayer = L.layerGroup().addTo(map);
+  respInactiveLayer = L.layerGroup();   // NOT added by default — user can turn it on
+
+  // Layer toggle control (top-right corner). Keys are HTML so the labels can include color swatches.
+  const overlays = {
+    '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:linear-gradient(135deg,#fee08b 0%,#fdae61 40%,#d73027 80%,#a50026 100%);margin-right:6px;vertical-align:-2px;box-shadow:0 0 0 1px rgba(0,0,0,0.08);"></span> Work Orders (heat)': woHeatLayer,
+    '<span style="display:inline-block;width:11px;height:11px;background:#2563eb;border-radius:3px;margin-right:6px;vertical-align:-1px;box-shadow:0 0 0 1px rgba(255,255,255,0.6),0 0 0 2px rgba(37,99,235,0.5);"></span> Safety Responders': respActiveLayer,
+    '<span style="display:inline-block;width:13px;height:13px;background:#ec4899;border-radius:3px;margin-right:6px;vertical-align:-2px;box-shadow:0 0 0 1px rgba(255,255,255,0.6),0 0 0 2px rgba(236,72,153,0.5);"></span> Managers &amp; SDM': respLeadLayer,
+    '<span style="display:inline-block;width:11px;height:11px;background:#9ca3af;border-radius:3px;margin-right:6px;vertical-align:-1px;opacity:0.7;"></span> On Leave (inactive)': respInactiveLayer
+  };
+  L.control.layers(null, overlays, { collapsed: false, position: 'topright' }).addTo(map);
+
+  // Keep the invisible click-target marker layer in sync with the heat layer visibility
+  map.on('overlayremove', e => {
+    if (e.layer === woHeatLayer && map.hasLayer(woMarkerLayer)) map.removeLayer(woMarkerLayer);
+  });
+  map.on('overlayadd', e => {
+    if (e.layer === woHeatLayer && !map.hasLayer(woMarkerLayer)) map.addLayer(woMarkerLayer);
+  });
 }
 
 async function loadAll() {
@@ -338,7 +364,7 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 // Filters & redraw
 // ============================================================
 function bindControls() {
-  ['filter-service', 'filter-region', 'filter-rating', 'toggle-wos', 'toggle-resp', 'toggle-inactive']
+  ['filter-service', 'filter-region', 'filter-rating']
     .forEach(id => document.getElementById(id).addEventListener('change', redraw));
   document.getElementById('reload-btn').addEventListener('click', () => {
     setStatus('Reloading…');
@@ -466,9 +492,6 @@ function redraw() {
   const fService = document.getElementById('filter-service').value.toLowerCase();
   const fRegion = document.getElementById('filter-region').value;
   const fRating = parseInt(document.getElementById('filter-rating').value, 10) || 0;
-  const showWOs = document.getElementById('toggle-wos').checked;
-  const showResp = document.getElementById('toggle-resp').checked;
-  const includeInactive = document.getElementById('toggle-inactive').checked;
 
   // Filter WOs by service text
   const filteredWOs = woData.filter(w => {
@@ -486,46 +509,44 @@ function redraw() {
   });
   const cities = Object.values(byCity).sort((a, b) => b.wos.length - a.wos.length);
 
-  // WO heat layer points: [lat, lng, intensity]
-  woHeatLayer.setLatLngs(showWOs ? cities.map(c => [c.lat, c.lng, c.wos.length]) : []);
-
-  // WO marker overlay (clickable centered dots for popup interaction)
+  // WO heat layer + invisible click targets — layer visibility is controlled by the Leaflet layer toggle.
+  woHeatLayer.setLatLngs(cities.map(c => [c.lat, c.lng, c.wos.length]));
   woMarkerLayer.clearLayers();
-  if (showWOs) {
-    cities.forEach(c => {
-      const m = L.circleMarker([c.lat, c.lng], {
-        radius: 4 + Math.sqrt(c.wos.length) * 2,
-        color: '#7a0d05', weight: 1, fillColor: '#d62e1f', fillOpacity: 0.0  // invisible; for click target
-      });
-      m.bindPopup(buildWoPopup(c), { maxWidth: 320 });
-      m.addTo(woMarkerLayer);
+  cities.forEach(c => {
+    const m = L.circleMarker([c.lat, c.lng], {
+      radius: 4 + Math.sqrt(c.wos.length) * 2,
+      color: '#7a0d05', weight: 1, fillColor: '#d62e1f', fillOpacity: 0.0
     });
-  }
+    m.bindPopup(buildWoPopup(c), { maxWidth: 320 });
+    m.addTo(woMarkerLayer);
+  });
 
-  // Responder filter
+  // Responder filter (region + rating only — leave status is handled by layer toggle)
   const filteredResp = respData.filter(r => {
     if (fRegion && r.region.indexOf(fRegion) === -1) return false;
     if (fRating && r.rating < fRating) return false;
-    if (!includeInactive && /leave/i.test(r.notes || '')) return false;
     return true;
   });
 
-  respMarkerLayer.clearLayers();
-  if (showResp) {
-    filteredResp.forEach(r => {
-      if (isNaN(r.lat) || isNaN(r.lng)) return;
-      const isLead = /Lead|Manager|SDM/i.test(r.region || '') || /Manager|Director|SDM/i.test(r.title || '');
-      const isInactive = /leave/i.test(r.notes || '');
-      const icon = L.divIcon({
-        className: 'resp-marker' + (isLead ? ' lead' : '') + (isInactive ? ' inactive' : ''),
-        iconSize: [isLead ? 16 : 11, isLead ? 16 : 11],
-        iconAnchor: [isLead ? 8 : 5.5, isLead ? 8 : 5.5]
-      });
-      const marker = L.marker([r.lat, r.lng], { icon: icon });
-      marker.bindPopup(buildRespPopup(r), { maxWidth: 280 });
-      marker.addTo(respMarkerLayer);
+  // Split into three layers based on lead/leave status. The layer control toggles visibility.
+  respActiveLayer.clearLayers();
+  respLeadLayer.clearLayers();
+  respInactiveLayer.clearLayers();
+  filteredResp.forEach(r => {
+    if (isNaN(r.lat) || isNaN(r.lng)) return;
+    const isLead = /Lead|Manager|SDM/i.test(r.region || '') || /Manager|Director|SDM/i.test(r.title || '');
+    const isInactive = /leave/i.test(r.notes || '');
+    const icon = L.divIcon({
+      className: 'resp-marker' + (isLead ? ' lead' : '') + (isInactive ? ' inactive' : ''),
+      iconSize: [isLead ? 16 : 11, isLead ? 16 : 11],
+      iconAnchor: [isLead ? 8 : 5.5, isLead ? 8 : 5.5]
     });
-  }
+    const marker = L.marker([r.lat, r.lng], { icon: icon });
+    marker.bindPopup(buildRespPopup(r), { maxWidth: 280 });
+    if (isInactive) marker.addTo(respInactiveLayer);
+    else if (isLead) marker.addTo(respLeadLayer);
+    else marker.addTo(respActiveLayer);
+  });
 
   // Stats
   document.getElementById('stat-wos').textContent = filteredWOs.length;

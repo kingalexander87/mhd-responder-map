@@ -58,6 +58,18 @@ aside .panel:last-child { margin-bottom: 0; }
 .svc-supply.gap { color: var(--accent); font-weight: 600; }
 .gap-note { color: var(--muted); font-size: 11px; padding-top: 6px; font-style: italic; line-height: 1.4; }
 .sub-label { font-size: 10px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+.warn-panel { background: #fef2f2 !important; border-color: #fecaca !important; }
+.warn-panel h3 { color: #b91c1c; }
+.warn-section { margin-bottom: 10px; }
+.warn-section:last-of-type { margin-bottom: 0; }
+.warn-section-title { font-size: 12px; font-weight: 600; color: #b91c1c; margin-bottom: 4px; }
+.warn-row { padding: 4px 0; border-bottom: 1px solid #fee2e2; font-size: 12px; line-height: 1.35; }
+.warn-row:last-child { border-bottom: none; }
+.warn-row .lbl, .warn-row .lbl a { color: #b91c1c; font-weight: 600; text-decoration: none; }
+.warn-row .lbl a:hover { text-decoration: underline; }
+.warn-row .sub { font-size: 11px; color: #7a0d05; }
+.warn-more { color: #b91c1c; font-size: 11px; padding-top: 4px; font-style: italic; }
+.warn-ok { color: #16a34a; font-size: 12px; font-style: italic; }
 .legend { display: flex; gap: 14px; font-size: 12px; align-items: center; color: #4b5563; }
 .legend-item { display: flex; align-items: center; gap: 6px; }
 .legend-swatch { width: 14px; height: 14px; border-radius: 50%; box-shadow: 0 0 0 1px rgba(0,0,0,0.06); }
@@ -166,6 +178,11 @@ aside .panel:last-child { margin-bottom: 0; }
       <h3>Service Coverage</h3>
       <div id="service-coverage-list"></div>
       <div class="gap-note">Left number = upcoming WOs needing that service. Right number = schedulable responders qualified for it (excludes managers/SDM and on-leave). Ratio &gt;5 WOs per responder flagged as "stretched".</div>
+    </div>
+    <div class="panel warn-panel">
+      <h3>⚠ Warnings</h3>
+      <div id="warnings-list"></div>
+      <div class="gap-note">Issues within the current filter scope. Clear filters to see all.</div>
     </div>
   </aside>
 </div>
@@ -847,6 +864,85 @@ function redraw() {
         return `<div class="row"><span class="count">${c.wos}</span><span class="where">${escapeHtml(c.svc)}</span><span class="svc-supply ${supplyCls}">${label}</span></div>`;
       }).join('')
     : '<div class="gap-note">No service data.</div>';
+
+  // ===== Warnings =====
+  // Surfaces any data-quality / assignment issues for the current filter scope so Alex
+  // can spot WOs that need attention. Each category is rendered only if it has hits.
+  const warnings = [];
+
+  // 1. WOs assigned to flagged responders (ex-employees, sales) → reassignment needed.
+  const reassignWOs = filteredWOs
+    .map(w => ({ w: w, flag: findFlaggedResponder(w.responder) }))
+    .filter(x => x.flag);
+  if (reassignWOs.length > 0) {
+    warnings.push({
+      title: reassignWOs.length + ' WO' + (reassignWOs.length > 1 ? 's' : '') + ' need reassignment',
+      items: reassignWOs.slice(0, 5).map(x => ({
+        label: 'WO ' + x.w.wo + ' — ' + x.flag.name,
+        sub: x.flag.reason + (x.w.city ? ' (' + x.w.city + ', ' + x.w.state + ')' : ''),
+        url: x.w.dealUrl
+      })),
+      moreCount: Math.max(0, reassignWOs.length - 5)
+    });
+  }
+
+  // 2. WOs with no assigned responder.
+  const unassignedWOs = filteredWOs.filter(w => !(w.responder || '').trim());
+  if (unassignedWOs.length > 0) {
+    warnings.push({
+      title: unassignedWOs.length + ' WO' + (unassignedWOs.length > 1 ? 's' : '') + ' missing a responder',
+      items: unassignedWOs.slice(0, 5).map(w => ({
+        label: 'WO ' + w.wo + (w.city ? ' — ' + w.city + ', ' + w.state : ''),
+        sub: (w.name || '').substring(0, 70),
+        url: w.dealUrl
+      })),
+      moreCount: Math.max(0, unassignedWOs.length - 5)
+    });
+  }
+
+  // 3. Unknown HubSpot responder names — not in MASTER (after format flip + alias),
+  //    not in RESPONDER_FLAGS. Indicates a new responder to add, or a new alias to map.
+  const masterNorms = new Set(respData.map(r => normRespName(r.name)).filter(Boolean));
+  const unknownNames = new Map(); // normForm → { display, count }
+  filteredWOs.forEach(w => {
+    if (!w.responder) return;
+    w.responder.split(/\s*[\/;]\s*/).forEach(part => {
+      const display = part.trim();
+      if (!display) return;
+      const flatLower = display.toLowerCase().replace(/\s+/g, ' ');
+      if (RESPONDER_FLAGS[flatLower]) return;
+      const n = normRespName(display);
+      if (masterNorms.has(n)) return;
+      if (!unknownNames.has(n)) unknownNames.set(n, { display: display, count: 0 });
+      unknownNames.get(n).count++;
+    });
+  });
+  if (unknownNames.size > 0) {
+    const list = Array.from(unknownNames.values()).sort((a, b) => b.count - a.count);
+    warnings.push({
+      title: unknownNames.size + ' unknown responder name' + (unknownNames.size > 1 ? 's' : ''),
+      items: list.slice(0, 5).map(u => ({
+        label: '"' + u.display + '"',
+        sub: u.count + ' WO' + (u.count > 1 ? 's' : '') + ' — add to MASTER or RESPONDER_ALIASES'
+      })),
+      moreCount: Math.max(0, list.length - 5)
+    });
+  }
+
+  // Render
+  document.getElementById('warnings-list').innerHTML = warnings.length > 0
+    ? warnings.map(w => {
+        const items = w.items.map(it => {
+          const lbl = it.url
+            ? `<a href="${escapeHtml(it.url)}" target="_blank" rel="noopener">${escapeHtml(it.label)} ↗</a>`
+            : escapeHtml(it.label);
+          const sub = it.sub ? `<div class="sub">${escapeHtml(it.sub)}</div>` : '';
+          return `<div class="warn-row"><span class="lbl">${lbl}</span>${sub}</div>`;
+        }).join('');
+        const more = w.moreCount > 0 ? `<div class="warn-more">+ ${w.moreCount} more</div>` : '';
+        return `<div class="warn-section"><div class="warn-section-title">${escapeHtml(w.title)}</div>${items}${more}</div>`;
+      }).join('')
+    : '<div class="warn-ok">✓ No warnings in current view.</div>';
 }
 
 // ============================================================

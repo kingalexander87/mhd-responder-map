@@ -57,6 +57,7 @@ aside .panel:last-child { margin-bottom: 0; }
 .svc-supply.stretched { color: #c2410c; font-weight: 600; }
 .svc-supply.gap { color: var(--accent); font-weight: 600; }
 .gap-note { color: var(--muted); font-size: 11px; padding-top: 6px; font-style: italic; line-height: 1.4; }
+.sub-label { font-size: 10px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
 .legend { display: flex; gap: 14px; font-size: 12px; align-items: center; color: #4b5563; }
 .legend-item { display: flex; align-items: center; gap: 6px; }
 .legend-swatch { width: 14px; height: 14px; border-radius: 50%; box-shadow: 0 0 0 1px rgba(0,0,0,0.06); }
@@ -140,12 +141,18 @@ aside .panel:last-child { margin-bottom: 0; }
     </div>
     <div class="panel">
       <h3>Top Hotspots</h3>
-      <div id="hotspots-list"></div>
+      <div class="sub-label">Top 3 counties</div>
+      <div id="hotspots-counties"></div>
+      <div class="sub-label" style="margin-top:10px;">Top 5 states</div>
+      <div id="hotspots-states"></div>
     </div>
     <div class="panel">
       <h3>Coverage Gaps</h3>
-      <div id="gaps-list"></div>
-      <div class="gap-note">Cities with WOs and no active responder within 150 miles.</div>
+      <div class="sub-label">Top 3 counties</div>
+      <div id="gaps-counties"></div>
+      <div class="sub-label" style="margin-top:10px;">Top 5 states</div>
+      <div id="gaps-states"></div>
+      <div class="gap-note">Uncovered WOs (no active responder within 150 mi), aggregated by county and state.</div>
     </div>
     <div class="panel">
       <h3>Service Coverage</h3>
@@ -343,10 +350,13 @@ async function loadAll() {
         start: r['Start Date'],
         address: r['Address'],
         city: r['City'],
+        county: r['County'] || '',
         state: r['State'],
         lat: parseFloat(r['Lat']),
         lng: parseFloat(r['Lng']),
-        summary: r['Schedule Summary']
+        summary: r['Schedule Summary'] || '',
+        responder: r['Responder'] || '',
+        dealUrl: r['Deal URL'] || ''
       }))
       .filter(r => r.wo && !isNaN(r.lat) && !isNaN(r.lng));
 
@@ -647,18 +657,56 @@ function redraw() {
   document.getElementById('stat-resp').textContent = filteredResp.filter(r => !/leave/i.test(r.notes || '')).length;
   document.getElementById('stat-states').textContent = new Set(cities.map(c => c.state)).size;
 
-  // Top hotspots
-  document.getElementById('hotspots-list').innerHTML = cities.slice(0, 10).map(c =>
-    `<div class="row"><span class="count">${c.wos.length}</span><span class="where">${escapeHtml(c.city)}, ${escapeHtml(c.state)}</span></div>`
-  ).join('') || '<div class="gap-note">No matches</div>';
+  // ===== Aggregate by county + state (used for both Hotspots and Coverage Gaps panels) =====
+  const woByCounty = {}, woByState = {};
+  filteredWOs.forEach(w => {
+    if (w.county && w.state) {
+      const k = w.county + '|' + w.state;
+      woByCounty[k] = woByCounty[k] || { county: w.county, state: w.state, n: 0 };
+      woByCounty[k].n++;
+    }
+    if (w.state) {
+      woByState[w.state] = woByState[w.state] || { state: w.state, n: 0 };
+      woByState[w.state].n++;
+    }
+  });
+  const topCounties = Object.values(woByCounty).sort((a, b) => b.n - a.n).slice(0, 3);
+  const topStates   = Object.values(woByState).sort((a, b) => b.n - a.n).slice(0, 5);
 
-  // Coverage gaps
+  document.getElementById('hotspots-counties').innerHTML = topCounties.length > 0
+    ? topCounties.map(c => `<div class="row"><span class="count">${c.n}</span><span class="where">${escapeHtml(c.county)}, ${escapeHtml(c.state)}</span></div>`).join('')
+    : '<div class="gap-note">No county data yet — run the sync.</div>';
+  document.getElementById('hotspots-states').innerHTML = topStates.length > 0
+    ? topStates.map(s => `<div class="row"><span class="count">${s.n}</span><span class="where">${escapeHtml(s.state)}</span></div>`).join('')
+    : '<div class="gap-note">No matches</div>';
+
+  // ===== Coverage gaps: aggregate uncovered WOs by county + state =====
+  // "Uncovered" = no active responder within 150 mi of that WO's location.
   const activeResp = filteredResp.filter(r => !/leave/i.test(r.notes || '') && !isNaN(r.lat) && !isNaN(r.lng));
-  const gaps = cities.filter(c =>
-    !activeResp.some(r => distMiles(c.lat, c.lng, r.lat, r.lng) < COVERAGE_RADIUS_MI)
-  ).slice(0, 15);
-  document.getElementById('gaps-list').innerHTML = gaps.length > 0
-    ? gaps.map(c => `<div class="row"><span class="count">${c.wos.length}</span><span class="where">${escapeHtml(c.city)}, ${escapeHtml(c.state)}</span></div>`).join('')
+  const uncoveredWOs = filteredWOs.filter(w => {
+    if (isNaN(w.lat) || isNaN(w.lng)) return false;
+    return !activeResp.some(r => distMiles(w.lat, w.lng, r.lat, r.lng) < COVERAGE_RADIUS_MI);
+  });
+  const gapByCounty = {}, gapByState = {};
+  uncoveredWOs.forEach(w => {
+    if (w.county && w.state) {
+      const k = w.county + '|' + w.state;
+      gapByCounty[k] = gapByCounty[k] || { county: w.county, state: w.state, n: 0 };
+      gapByCounty[k].n++;
+    }
+    if (w.state) {
+      gapByState[w.state] = gapByState[w.state] || { state: w.state, n: 0 };
+      gapByState[w.state].n++;
+    }
+  });
+  const topGapCounties = Object.values(gapByCounty).sort((a, b) => b.n - a.n).slice(0, 3);
+  const topGapStates   = Object.values(gapByState).sort((a, b) => b.n - a.n).slice(0, 5);
+
+  document.getElementById('gaps-counties').innerHTML = topGapCounties.length > 0
+    ? topGapCounties.map(c => `<div class="row"><span class="count">${c.n}</span><span class="where">${escapeHtml(c.county)}, ${escapeHtml(c.state)}</span></div>`).join('')
+    : '<div class="gap-note">No gaps with current filters.</div>';
+  document.getElementById('gaps-states').innerHTML = topGapStates.length > 0
+    ? topGapStates.map(s => `<div class="row"><span class="count">${s.n}</span><span class="where">${escapeHtml(s.state)}</span></div>`).join('')
     : '<div class="gap-note">No gaps with current filters.</div>';
 
   // ===== Service Coverage =====
@@ -708,10 +756,22 @@ function buildWoPopup(c) {
   const items = c.wos.slice(0, 6).map(w => {
     const zip = extractZip(w.address);
     const zipBit = zip ? ` · <span style="color:#666">ZIP ${zip}</span>` : '';
-    return `<li><b>WO ${escapeHtml(w.wo)}</b> · ${escapeHtml(w.start)}${zipBit}<br><span class="sub">${escapeHtml((w.name || '').substring(0, 100))}</span></li>`;
+    // WO # is a clickable link to the deal in HubSpot when we have a URL; otherwise plain text.
+    const woLabel = w.dealUrl
+      ? `<a href="${escapeHtml(w.dealUrl)}" target="_blank" rel="noopener" style="color:#b91c1c;text-decoration:none;font-weight:600;">WO ${escapeHtml(w.wo)} ↗</a>`
+      : `<b>WO ${escapeHtml(w.wo)}</b>`;
+    const respBit = w.responder
+      ? `<div style="margin-top:2px;font-size:12px;"><b style="color:#374151;">Responder:</b> <span style="color:#1f2937;">${escapeHtml(w.responder)}</span></div>`
+      : '';
+    // Confirmed Schedule Summary — capped for popup readability.
+    const sumText = (w.summary || '').trim();
+    const sumBit = sumText
+      ? `<div class="sub" style="margin-top:3px;font-style:italic;line-height:1.4;">${escapeHtml(sumText.length > 220 ? sumText.substring(0, 220) + '…' : sumText)}</div>`
+      : '';
+    return `<li style="margin-bottom:8px;">${woLabel} · ${escapeHtml(w.start)}${zipBit}<br><span class="sub">${escapeHtml((w.name || '').substring(0, 100))}</span>${respBit}${sumBit}</li>`;
   }).join('');
   const more = c.wos.length > 6 ? `<div class="sub">+ ${c.wos.length - 6} more</div>` : '';
-  return `<h4>${escapeHtml(c.city)}, ${escapeHtml(c.state)} — ${c.wos.length} WO${c.wos.length > 1 ? 's' : ''}</h4><ul>${items}</ul>${more}`;
+  return `<h4>${escapeHtml(c.city)}, ${escapeHtml(c.state)} — ${c.wos.length} WO${c.wos.length > 1 ? 's' : ''}</h4><ul style="padding-left:16px;">${items}</ul>${more}`;
 }
 
 function buildRespPopup(r) {

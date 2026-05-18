@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MHD Work Order Heat Map — 120 Days</title>
+<title>MHD Heat Map — WO + Closed Lost</title>
 
 <!-- Leaflet core -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
@@ -74,8 +74,12 @@ aside .panel:last-child { margin-bottom: 0; }
 .legend-item { display: flex; align-items: center; gap: 6px; }
 .legend-swatch { width: 14px; height: 14px; border-radius: 50%; box-shadow: 0 0 0 1px rgba(0,0,0,0.06); }
 .legend-swatch.wo { background: linear-gradient(135deg, #fee08b 0%, #fdae61 40%, #d73027 80%, #a50026 100%); }
+.legend-swatch.lost { background: linear-gradient(135deg, #dbeafe 0%, #93c5fd 40%, #3b82f6 80%, #1e3a8a 100%); }
 .legend-swatch.resp { background: var(--responder); border-radius: 3px; box-shadow: 0 0 0 1px rgba(255,255,255,0.4), 0 0 0 2px rgba(37,99,235,0.5); }
 .legend-swatch.lead { background: var(--lead); border-radius: 3px; box-shadow: 0 0 0 1px rgba(255,255,255,0.4), 0 0 0 2px rgba(236,72,153,0.5); }
+.lost-pill { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 10px; font-weight: 600; background: #dbeafe; color: #1e40af; margin-right: 4px; }
+.lost-amount { color: #1e3a8a; font-weight: 600; font-variant-numeric: tabular-nums; }
+.row .count.lost { color: #1e40af; }
 .status { font-size: 11px; color: var(--muted); padding: 8px 20px; background: var(--panel); border-top: 1px solid var(--border); font-variant-numeric: tabular-nums; }
 @media (max-width: 900px) {
   .layout { grid-template-columns: 1fr; }
@@ -113,6 +117,7 @@ aside .panel:last-child { margin-bottom: 0; }
   </div>
   <div class="legend">
     <div class="legend-item"><span class="legend-swatch wo"></span> WO density</div>
+    <div class="legend-item"><span class="legend-swatch lost"></span> Closed Lost</div>
     <div class="legend-item"><span class="legend-swatch resp"></span> Responder</div>
     <div class="legend-item"><span class="legend-swatch lead"></span> Lead / Mgr</div>
   </div>
@@ -140,6 +145,7 @@ aside .panel:last-child { margin-bottom: 0; }
         <label>Responder region <select id="filter-region" style="margin-left:auto;"><option value="">All</option><option value="NE">NE</option><option value="SE">SE</option><option value="W">W</option><option value="C">C</option></select></label>
         <label>Min responder rating <select id="filter-rating" style="margin-left:auto;"><option value="0">Any</option><option value="6">6+</option><option value="7">7+</option><option value="8">8+</option><option value="9">9</option></select></label>
         <label>Date window <select id="filter-days" style="margin-left:auto;"><option value="30">Next 30 days</option><option value="60">Next 60 days</option><option value="90">Next 90 days</option><option value="120" selected>Next 120 days</option><option value="180">Next 180 days</option><option value="365">Next 365 days</option></select></label>
+        <label>Lost lookback <select id="filter-lost-days" style="margin-left:auto;"><option value="30">Last 30 days</option><option value="60">Last 60 days</option><option value="90">Last 90 days</option><option value="120">Last 120 days</option><option value="180">Last 180 days</option><option value="365" selected>Last 365 days</option></select></label>
         <div class="gap-note" style="margin-top:4px;">Toggle layers on/off using the panel in the top-right of the map.</div>
         <button id="reload-btn" style="margin-top:6px;">Reload data</button>
       </div>
@@ -179,6 +185,18 @@ aside .panel:last-child { margin-bottom: 0; }
       <div id="service-coverage-list"></div>
       <div class="gap-note">Left number = upcoming WOs needing that service. Right number = schedulable responders qualified for it (excludes managers/SDM and on-leave). Ratio &gt;5 WOs per responder flagged as "stretched".</div>
     </div>
+    <div class="panel">
+      <h3>Closed Lost Analysis</h3>
+      <div class="kv"><span>Total lost deals</span><b id="stat-lost-count">—</b></div>
+      <div class="kv"><span>Total $ value</span><b id="stat-lost-amount" class="lost-amount">—</b></div>
+      <div class="sub-label" style="margin-top:10px;">Top categories</div>
+      <div id="lost-categories"></div>
+      <div class="sub-label" style="margin-top:10px;">Top reasons</div>
+      <div id="lost-reasons"></div>
+      <div class="sub-label" style="margin-top:10px;">Top hotspots</div>
+      <div id="lost-hotspots"></div>
+      <div class="gap-note">Closed Lost deals across A/E, A/M, EC/S pipelines within the Lost lookback window. Toggle the blue "Closed Lost" layer in the top-right to see locations on the map.</div>
+    </div>
     <div class="panel warn-panel">
       <h3>⚠ Warnings</h3>
       <div id="warnings-list"></div>
@@ -195,6 +213,8 @@ aside .panel:last-child { margin-bottom: 0; }
 const SHEET_ID = '14VbFR3dKRCb2LoalZQxTYMSN8g_IXhmCDQci3112D50';
 const WO_FEED_TAB = 'WO_HEAT_FEED';
 const META_TAB = 'WO_HEAT_META';
+const WO_LOST_TAB = 'WO_HEAT_LOST';         // Closed Lost deals (last 365 days), written by WO_Lost_Sync.gs
+const LOST_META_TAB = 'WO_HEAT_LOST_META';
 const RESPONDER_TAB = 'MASTER'; // or 'MAPS EXPORT' depending on which is the cleanest source
 const COVERAGE_RADIUS_MI = 150;
 
@@ -375,7 +395,9 @@ function findFlaggedResponder(rawValue) {
 // ============================================================
 let map, woHeatLayer, woMarkerLayer;
 let respActiveLayer, respLeadLayer, respInactiveLayer;
+let lostHeatLayer, lostMarkerLayer;        // Closed Lost layer pair (heat + invisible click targets)
 let woData = [], respData = [], metaData = {};
+let lostData = [], lostMetaData = {};      // Closed Lost feed, populated from WO_HEAT_LOST tab
 
 // ============================================================
 // Init
@@ -396,6 +418,14 @@ function initMap() {
   }).addTo(map);
   woMarkerLayer = L.layerGroup().addTo(map);
 
+  // Closed Lost heat layer — blue gradient. Density-weighted by deal count.
+  // Created here but NOT added by default — user toggles it on via the overlay control.
+  lostHeatLayer = L.heatLayer([], {
+    radius: 28, blur: 22, maxZoom: 8, minOpacity: 0.45,
+    gradient: { 0.15: '#dbeafe', 0.35: '#93c5fd', 0.55: '#3b82f6', 0.75: '#1d4ed8', 1.0: '#1e3a8a' }
+  });
+  lostMarkerLayer = L.layerGroup();   // invisible click targets — only added when lost layer is on
+
   // Three separate responder layers so each can be toggled independently
   respActiveLayer = L.layerGroup().addTo(map);
   respLeadLayer = L.layerGroup().addTo(map);
@@ -404,6 +434,7 @@ function initMap() {
   // Layer toggle control (top-right corner). Keys are HTML so the labels can include color swatches.
   const overlays = {
     '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:linear-gradient(135deg,#fee08b 0%,#fdae61 40%,#d73027 80%,#a50026 100%);margin-right:6px;vertical-align:-2px;box-shadow:0 0 0 1px rgba(0,0,0,0.08);"></span> Work Orders (heat)': woHeatLayer,
+    '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:linear-gradient(135deg,#dbeafe 0%,#93c5fd 40%,#3b82f6 80%,#1e3a8a 100%);margin-right:6px;vertical-align:-2px;box-shadow:0 0 0 1px rgba(0,0,0,0.08);"></span> Closed Lost (heat)': lostHeatLayer,
     '<span style="display:inline-block;width:11px;height:11px;background:#2563eb;border-radius:3px;margin-right:6px;vertical-align:-1px;box-shadow:0 0 0 1px rgba(255,255,255,0.6),0 0 0 2px rgba(37,99,235,0.5);"></span> Safety Responders': respActiveLayer,
     '<span style="display:inline-block;width:13px;height:13px;background:#ec4899;border-radius:3px;margin-right:6px;vertical-align:-2px;box-shadow:0 0 0 1px rgba(255,255,255,0.6),0 0 0 2px rgba(236,72,153,0.5);"></span> Managers &amp; SDM': respLeadLayer,
     '<span style="display:inline-block;width:11px;height:11px;background:#9ca3af;border-radius:3px;margin-right:6px;vertical-align:-1px;opacity:0.7;"></span> On Leave (inactive)': respInactiveLayer
@@ -413,16 +444,18 @@ function initMap() {
   // Keep the invisible click-target marker layer in sync with the heat layer visibility
   map.on('overlayremove', e => {
     if (e.layer === woHeatLayer && map.hasLayer(woMarkerLayer)) map.removeLayer(woMarkerLayer);
+    if (e.layer === lostHeatLayer && map.hasLayer(lostMarkerLayer)) map.removeLayer(lostMarkerLayer);
   });
   map.on('overlayadd', e => {
     if (e.layer === woHeatLayer && !map.hasLayer(woMarkerLayer)) map.addLayer(woMarkerLayer);
+    if (e.layer === lostHeatLayer && !map.hasLayer(lostMarkerLayer)) map.addLayer(lostMarkerLayer);
   });
 }
 
 async function loadAll() {
-  setStatus('Loading WO data from Sheet…');
+  setStatus('Loading WO + Closed Lost data from Sheet…');
   try {
-    const [woRows, respRows, metaRows] = await Promise.all([
+    const [woRows, respRows, metaRows, lostRows, lostMetaRows] = await Promise.all([
       fetchCsv(gvizCsv(WO_FEED_TAB)),
       // MASTER has IDENTIFICATION/CONTACT/etc category labels on row 1, real headers on row 2.
       // Range A2:U skips the category row AND stops at the last real column ("Flags").
@@ -430,7 +463,11 @@ async function loadAll() {
       // it tried to dedupe duplicate "" headers with _1/_2/.. suffixes and ate the first
       // data row into a malformed column name, dropping Allison, Terri silently.)
       fetchCsv(gvizCsv(RESPONDER_TAB, RESPONDER_TAB === 'MASTER' ? 'A2:U' : undefined)),
-      fetchCsv(gvizCsv(META_TAB)).catch(() => [])
+      fetchCsv(gvizCsv(META_TAB)).catch(() => []),
+      // Closed Lost feed — falls back to empty array if the tab hasn't been created yet
+      // (e.g. before syncWOLostFeed has been run for the first time).
+      fetchCsv(gvizCsv(WO_LOST_TAB)).catch(() => []),
+      fetchCsv(gvizCsv(LOST_META_TAB)).catch(() => [])
     ]);
 
     woData = woRows
@@ -478,6 +515,34 @@ async function loadAll() {
 
     metaRows.forEach(r => { metaData[r['Key'] || r[0]] = r['Value'] || r[1]; });
 
+    // Closed Lost rows. The Apps Script geocoder may leave Lat/Lng blank for deals
+    // with neither a parseable service_address nor an extractable zip — filter those
+    // out so they don't break the heat layer. Their counts are still surfaced in
+    // the `WO_HEAT_LOST_META` tab via the `no_location` key.
+    lostData = lostRows
+      .map(r => ({
+        dealId: r['Deal ID'] || '',
+        name: r['Deal Name'] || '',
+        closedate: r['Close Date'] || '',
+        amount: parseFloat(r['Amount']) || 0,
+        category: r['Category'] || '',
+        reason: r['Reason'] || '',
+        address: r['Address'] || '',
+        city: r['City'] || '',
+        county: r['County'] || '',
+        state: r['State'] || '',
+        zip: r['Zip'] || '',
+        lat: parseFloat(r['Lat']),
+        lng: parseFloat(r['Lng']),
+        pipeline: r['Pipeline'] || '',
+        dealUrl: r['Deal URL'] || '',
+        locationSource: r['Location Source'] || ''
+      }))
+      .filter(r => r.dealId && !isNaN(r.lat) && !isNaN(r.lng));
+
+    lostMetaData = {};
+    lostMetaRows.forEach(r => { lostMetaData[r['Key'] || r[0]] = r['Value'] || r[1]; });
+
     // If responder rows lack lat/lng, geocode their addresses client-side using Nominatim
     // (one-time, cached in localStorage so reloads are instant).
     await ensureResponderCoords(respData);
@@ -487,7 +552,7 @@ async function loadAll() {
 
     document.getElementById('meta').textContent = buildMetaText();
     populateResponderDatalist();
-    setStatus('Ready. ' + woData.length + ' WOs · ' + respData.length + ' responders.');
+    setStatus('Ready. ' + woData.length + ' WOs · ' + respData.length + ' responders · ' + lostData.length + ' Closed Lost deals.');
     redraw();
   } catch (e) {
     console.error(e);
@@ -543,7 +608,7 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 // Filters & redraw
 // ============================================================
 function bindControls() {
-  ['filter-service', 'filter-region', 'filter-rating', 'filter-days']
+  ['filter-service', 'filter-region', 'filter-rating', 'filter-days', 'filter-lost-days']
     .forEach(id => document.getElementById(id).addEventListener('change', redraw));
   document.getElementById('reload-btn').addEventListener('click', () => {
     setStatus('Reloading…');
@@ -868,6 +933,71 @@ function redraw() {
       }).join('')
     : '<div class="gap-note">No service data.</div>';
 
+  // ===== Closed Lost layer + analysis =====
+  // Uses its own lookback dropdown (independent of the WO forward date window).
+  // Respects Region and Service filters so the picture matches the rest of the view.
+  // Rating filter intentionally ignored — it's responder-related, not relevant to lost deals.
+  const fLostDays = parseInt(document.getElementById('filter-lost-days').value, 10) || 365;
+  const lostCutoff = new Date(today.getTime() - fLostDays * 86400000);
+  const filteredLost = lostData.filter(l => {
+    if (fRegion && !woInRegion(l, fRegion)) return false;
+    if (fService && !woNeedsService({ name: l.name, summary: l.reason }, fService)) return false;
+    const d = parseWoDate(l.closedate);
+    if (d && (d < lostCutoff || d > today)) return false;
+    return true;
+  });
+
+  // Aggregate Closed Lost by city for the blue heat layer + invisible click targets.
+  const lostByCity = {};
+  filteredLost.forEach(l => {
+    const k = (l.city + '|' + l.state).toLowerCase();
+    if (!lostByCity[k]) lostByCity[k] = { city: l.city, state: l.state, lat: l.lat, lng: l.lng, deals: [] };
+    lostByCity[k].deals.push(l);
+  });
+  const lostCities = Object.values(lostByCity).sort((a, b) => b.deals.length - a.deals.length);
+
+  lostHeatLayer.setLatLngs(lostCities.map(c => [c.lat, c.lng, c.deals.length]));
+  lostMarkerLayer.clearLayers();
+  lostCities.forEach(c => {
+    const m = L.circleMarker([c.lat, c.lng], {
+      radius: 4 + Math.sqrt(c.deals.length) * 2,
+      color: '#1e3a8a', weight: 1, fillColor: '#3b82f6', fillOpacity: 0.0
+    });
+    m.bindPopup(buildLostPopup(c), { maxWidth: 360 });
+    m.addTo(lostMarkerLayer);
+  });
+
+  // Aggregate counts/totals for the right-side panel.
+  const lostTotal = filteredLost.length;
+  const lostAmountTotal = filteredLost.reduce((sum, l) => sum + (l.amount || 0), 0);
+  const catTally = {};
+  const reasonTally = {};
+  filteredLost.forEach(l => {
+    const cat = (l.category || '').trim() || '(no category)';
+    catTally[cat] = (catTally[cat] || 0) + 1;
+    // For reasons, normalize whitespace and cap length for tally grouping
+    const reasonRaw = (l.reason || '').trim();
+    const reason = reasonRaw ? (reasonRaw.length > 60 ? reasonRaw.substring(0, 60) + '…' : reasonRaw) : '(no reason)';
+    reasonTally[reason] = (reasonTally[reason] || 0) + 1;
+  });
+  const topCats = Object.entries(catTally).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const topReasons = Object.entries(reasonTally).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const lostHotspots = lostCities.slice(0, 5);
+
+  document.getElementById('stat-lost-count').textContent = lostTotal;
+  document.getElementById('stat-lost-amount').textContent = lostAmountTotal > 0
+    ? '$' + lostAmountTotal.toLocaleString('en-US', { maximumFractionDigits: 0 })
+    : '—';
+  document.getElementById('lost-categories').innerHTML = topCats.length > 0
+    ? topCats.map(c => `<div class="row"><span class="count lost">${c[1]}</span><span class="where">${escapeHtml(c[0])}</span></div>`).join('')
+    : '<div class="gap-note">No Closed Lost deals in current view.</div>';
+  document.getElementById('lost-reasons').innerHTML = topReasons.length > 0
+    ? topReasons.map(r => `<div class="row"><span class="count lost">${r[1]}</span><span class="where">${escapeHtml(r[0])}</span></div>`).join('')
+    : '<div class="gap-note">No reasons recorded.</div>';
+  document.getElementById('lost-hotspots').innerHTML = lostHotspots.length > 0
+    ? lostHotspots.map(c => `<div class="row"><span class="count lost">${c.deals.length}</span><span class="where">${escapeHtml(c.city)}, ${escapeHtml(c.state)}</span></div>`).join('')
+    : '<div class="gap-note">No locations to highlight.</div>';
+
   // ===== Warnings =====
   // Surfaces any data-quality / assignment issues for the current filter scope so Alex
   // can spot WOs that need attention. Each category is rendered only if it has hits.
@@ -982,6 +1112,45 @@ function buildWoPopup(c) {
   }).join('');
   const more = c.wos.length > 6 ? `<div class="sub">+ ${c.wos.length - 6} more</div>` : '';
   return `<h4>${escapeHtml(c.city)}, ${escapeHtml(c.state)} — ${c.wos.length} WO${c.wos.length > 1 ? 's' : ''}</h4><ul style="padding-left:16px;">${items}</ul>${more}`;
+}
+
+function buildLostPopup(c) {
+  // Cluster popup: one entry per Closed Lost deal in this city.
+  // Capped at 8 visible items + a "+ N more" tail to keep popups readable.
+  const totalAmount = c.deals.reduce((sum, d) => sum + (d.amount || 0), 0);
+  const totalLabel = totalAmount > 0
+    ? ' · <span class="lost-amount">$' + totalAmount.toLocaleString('en-US', { maximumFractionDigits: 0 }) + '</span>'
+    : '';
+  const items = c.deals.slice(0, 8).map(d => {
+    const amt = d.amount > 0
+      ? '<span class="lost-amount">$' + d.amount.toLocaleString('en-US', { maximumFractionDigits: 0 }) + '</span>'
+      : '<span class="sub">no amount</span>';
+    const nameLabel = d.dealUrl
+      ? `<a href="${escapeHtml(d.dealUrl)}" target="_blank" rel="noopener" style="color:#1e40af;text-decoration:none;font-weight:600;">${escapeHtml(d.name || 'Untitled')} ↗</a>`
+      : `<b>${escapeHtml(d.name || 'Untitled')}</b>`;
+    const catBit = d.category
+      ? `<span class="lost-pill">${escapeHtml(d.category)}</span>`
+      : '';
+    const reasonBit = d.reason
+      ? `<div class="sub" style="margin-top:3px;font-style:italic;line-height:1.4;">${escapeHtml(d.reason.length > 200 ? d.reason.substring(0, 200) + '…' : d.reason)}</div>`
+      : '';
+    const closeBit = d.closedate ? `<span class="sub">${escapeHtml(formatLostDate(d.closedate))}</span>` : '';
+    const pipelineBit = d.pipeline ? ` · <span class="sub">${escapeHtml(d.pipeline)}</span>` : '';
+    return `<li style="margin-bottom:9px;">${nameLabel}<br>${catBit}${amt} · ${closeBit}${pipelineBit}${reasonBit}</li>`;
+  }).join('');
+  const more = c.deals.length > 8 ? `<div class="sub">+ ${c.deals.length - 8} more</div>` : '';
+  return `<h4 style="color:#1e40af;">Lost in ${escapeHtml(c.city)}, ${escapeHtml(c.state)} — ${c.deals.length} deal${c.deals.length > 1 ? 's' : ''}${totalLabel}</h4><ul style="padding-left:16px;margin-top:6px;">${items}</ul>${more}`;
+}
+
+// Format an epoch-ms-or-ISO close date for human display in the popup.
+// Returns YYYY-MM-DD which matches the rest of the page's date formatting.
+function formatLostDate(s) {
+  const d = parseWoDate(s);
+  if (!d) return String(s);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return y + '-' + m + '-' + day;
 }
 
 function buildRespPopup(r) {

@@ -1,0 +1,1193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MHD Heat Map — WO + Closed Lost</title>
+
+<!-- Leaflet core -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<!-- Heatmap plugin -->
+<script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+<!-- PapaParse for robust CSV parsing -->
+<script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
+
+<style>
+:root {
+  --bg: #f6f5f1;
+  --panel: #ffffff;
+  --border: #e7e3d8;
+  --border-strong: #d4cfc1;
+  --text: #1f2937;
+  --muted: #6b7280;
+  --accent: #b91c1c;
+  --accent-soft: #fef2f2;
+  --responder: #2563eb;
+  --lead: #ec4899;       /* pink — Regional Managers / SDM */
+  --lead-dark: #be185d;
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-md: 0 1px 3px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-lg: 0 4px 12px rgba(15, 23, 42, 0.06), 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: var(--text); background: var(--bg); -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+header { padding: 14px 20px; background: linear-gradient(180deg, #ffffff 0%, #fbfaf6 100%); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; box-shadow: var(--shadow-sm); position: relative; z-index: 10; }
+header h1 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.01em; color: #111827; }
+header .meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 12px; }
+.controls label { display: flex; align-items: center; gap: 4px; color: #374151; }
+.controls select, .controls input[type="text"] { font-size: 12px; padding: 4px 8px; border: 1px solid var(--border-strong); border-radius: 5px; background: #fff; color: var(--text); transition: border-color 0.15s, box-shadow 0.15s; }
+.controls select:focus, .controls input[type="text"]:focus, input[type="text"]:focus { outline: none; border-color: var(--responder); box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12); }
+.controls button, aside button { font-size: 12px; padding: 5px 12px; border: 1px solid var(--border-strong); background: #fff; border-radius: 5px; cursor: pointer; color: var(--text); transition: background 0.15s, border-color 0.15s; box-shadow: var(--shadow-sm); }
+.controls button:hover, aside button:hover { background: #faf9f5; border-color: #b8b3a3; }
+.layout { display: grid; grid-template-columns: 1fr 320px; height: calc(100vh - 62px); }
+#map { width: 100%; height: 100%; }
+aside { background: var(--bg); border-left: 1px solid var(--border); padding: 16px 16px 60px; overflow-y: auto; font-size: 13px; }
+aside h3 { margin: 0 0 8px; font-size: 11px; font-weight: 600; color: #4b5563; text-transform: uppercase; letter-spacing: 0.06em; }
+aside .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px 14px; margin-bottom: 12px; box-shadow: var(--shadow-md); }
+aside .panel:last-child { margin-bottom: 0; }
+.kv { display: flex; justify-content: space-between; padding: 3px 0; font-size: 13px; }
+.kv b { font-weight: 600; color: #111827; }
+.row { display: flex; justify-content: space-between; align-items: center; padding: 5px 0; border-bottom: 1px solid #f3f1eb; }
+.row:last-child { border-bottom: none; }
+.count { font-weight: 600; color: var(--accent); min-width: 28px; text-align: right; font-variant-numeric: tabular-nums; }
+.where { flex: 1; padding-left: 10px; color: #374151; }
+.svc-supply { color: var(--muted); font-size: 11px; min-width: 84px; text-align: right; }
+.svc-supply.stretched { color: #c2410c; font-weight: 600; }
+.svc-supply.gap { color: var(--accent); font-weight: 600; }
+.gap-note { color: var(--muted); font-size: 11px; padding-top: 6px; font-style: italic; line-height: 1.4; }
+.sub-label { font-size: 10px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+.warn-panel { background: #fef2f2 !important; border-color: #fecaca !important; }
+.warn-panel h3 { color: #b91c1c; }
+.warn-section { margin-bottom: 10px; }
+.warn-section:last-of-type { margin-bottom: 0; }
+.warn-section-title { font-size: 12px; font-weight: 600; color: #b91c1c; margin-bottom: 4px; }
+.warn-row { padding: 4px 0; border-bottom: 1px solid #fee2e2; font-size: 12px; line-height: 1.35; }
+.warn-row:last-child { border-bottom: none; }
+.warn-row .lbl, .warn-row .lbl a { color: #b91c1c; font-weight: 600; text-decoration: none; }
+.warn-row .lbl a:hover { text-decoration: underline; }
+.warn-row .sub { font-size: 11px; color: #7a0d05; }
+.warn-more { color: #b91c1c; font-size: 11px; padding-top: 4px; font-style: italic; }
+.warn-ok { color: #16a34a; font-size: 12px; font-style: italic; }
+.legend { display: flex; gap: 14px; font-size: 12px; align-items: center; color: #4b5563; }
+.legend-item { display: flex; align-items: center; gap: 6px; }
+.legend-swatch { width: 14px; height: 14px; border-radius: 50%; box-shadow: 0 0 0 1px rgba(0,0,0,0.06); }
+.legend-swatch.wo { background: linear-gradient(135deg, #fee08b 0%, #fdae61 40%, #d73027 80%, #a50026 100%); }
+.legend-swatch.lost { background: linear-gradient(135deg, #dbeafe 0%, #93c5fd 40%, #3b82f6 80%, #1e3a8a 100%); }
+.legend-swatch.resp { background: var(--responder); border-radius: 3px; box-shadow: 0 0 0 1px rgba(255,255,255,0.4), 0 0 0 2px rgba(37,99,235,0.5); }
+.legend-swatch.lead { background: var(--lead); border-radius: 3px; box-shadow: 0 0 0 1px rgba(255,255,255,0.4), 0 0 0 2px rgba(236,72,153,0.5); }
+.lost-pill { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 10px; font-weight: 600; background: #dbeafe; color: #1e40af; margin-right: 4px; }
+.lost-amount { color: #1e3a8a; font-weight: 600; font-variant-numeric: tabular-nums; }
+.row .count.lost { color: #1e40af; }
+.status { font-size: 11px; color: var(--muted); padding: 8px 20px; background: var(--panel); border-top: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  aside { border-left: none; border-top: 1px solid var(--border); max-height: 50vh; }
+  #map { height: 50vh; }
+}
+.resp-marker { background: var(--responder); border: 2px solid #fff; border-radius: 4px; box-shadow: 0 0 0 1px rgba(37,99,235,0.6), 0 1px 3px rgba(0,0,0,0.18); transition: transform 0.12s, box-shadow 0.12s; }
+.resp-marker:hover { transform: scale(1.25); box-shadow: 0 0 0 1px rgba(37,99,235,0.9), 0 2px 6px rgba(0,0,0,0.25); z-index: 1000 !important; }
+.resp-marker.lead { background: var(--lead); border-radius: 4px; box-shadow: 0 0 0 1px rgba(236,72,153,0.6), 0 1px 3px rgba(0,0,0,0.18); }
+.resp-marker.lead:hover { box-shadow: 0 0 0 1px rgba(236,72,153,0.95), 0 2px 6px rgba(0,0,0,0.3); }
+.resp-marker.inactive { background: #9ca3af; box-shadow: 0 0 0 1px rgba(75,85,99,0.4), 0 1px 2px rgba(0,0,0,0.12); opacity: 0.7; }
+.leaflet-popup-content-wrapper { border-radius: 8px; box-shadow: var(--shadow-lg); }
+.leaflet-popup-content { font-size: 13px; line-height: 1.5; margin: 12px 14px; }
+.leaflet-popup-content h4 { margin: 0 0 6px; font-size: 14px; color: #111827; }
+.leaflet-popup-content .sub { color: var(--muted); font-size: 11px; }
+.leaflet-popup-content ul { margin: 4px 0 0; padding-left: 18px; }
+.leaflet-popup-content ul li { padding: 2px 0; }
+.leaflet-popup-tip { box-shadow: var(--shadow-sm); }
+.leaflet-control-layers { border-radius: 8px !important; border: 1px solid var(--border) !important; box-shadow: var(--shadow-md) !important; background: rgba(255,255,255,0.96) !important; padding: 4px !important; }
+.leaflet-control-layers-expanded { padding: 10px 12px !important; min-width: 200px; }
+.leaflet-control-layers-expanded label { display: flex !important; align-items: center; padding: 4px 0; font-size: 13px; color: var(--text); cursor: pointer; line-height: 1.4; }
+.leaflet-control-layers-expanded label:hover { color: #111827; }
+.leaflet-control-layers-expanded input[type="checkbox"] { margin-right: 8px; accent-color: var(--responder); }
+.leaflet-control-layers-overlays { padding-top: 4px; }
+</style>
+<link rel="preconnect" href="https://rsms.me/">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>MHD Work Order Heat Map — Next 120 Days</h1>
+    <div class="meta" id="meta">Loading…</div>
+  </div>
+  <div class="legend">
+    <div class="legend-item"><span class="legend-swatch wo"></span> WO density</div>
+    <div class="legend-item"><span class="legend-swatch lost"></span> Closed Lost</div>
+    <div class="legend-item"><span class="legend-swatch resp"></span> Responder</div>
+    <div class="legend-item"><span class="legend-swatch lead"></span> Lead / Mgr</div>
+  </div>
+</header>
+
+<div class="layout">
+  <div id="map"></div>
+  <aside>
+    <div class="panel">
+      <h3>Search</h3>
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;">
+        <input id="zip-search" type="text" inputmode="numeric" placeholder="ZIP code" maxlength="5"
+               style="flex:1;font-size:13px;padding:4px 8px;border:1px solid #d0d0d0;border-radius:4px;">
+        <button id="zip-go" style="font-size:12px;padding:4px 12px;border:1px solid #d0d0d0;background:#fff;border-radius:4px;cursor:pointer;">Go</button>
+      </div>
+      <input id="resp-search" type="text" list="resp-names" placeholder="Find responder by name…"
+             style="width:100%;font-size:13px;padding:4px 8px;border:1px solid #d0d0d0;border-radius:4px;box-sizing:border-box;">
+      <datalist id="resp-names"></datalist>
+      <button id="clear-search" style="display:none;margin-top:6px;font-size:11px;padding:3px 10px;border:1px solid #d0d0d0;background:#fff;border-radius:4px;cursor:pointer;">✕ Clear search</button>
+    </div>
+    <div class="panel">
+      <h3>Filters</h3>
+      <div class="controls" style="flex-direction:column;align-items:stretch;gap:6px;">
+        <label>Service <select id="filter-service" style="margin-left:auto;"><option value="">All</option><option>Audio</option><option>ResFit</option><option>MEQ</option><option>Air</option><option>NLS</option><option>ENLS</option><option>Dosimetry</option></select></label>
+        <label>Responder region <select id="filter-region" style="margin-left:auto;"><option value="">All</option><option value="NE">NE</option><option value="SE">SE</option><option value="W">W</option><option value="C">C</option></select></label>
+        <label>Min responder rating <select id="filter-rating" style="margin-left:auto;"><option value="0">Any</option><option value="6">6+</option><option value="7">7+</option><option value="8">8+</option><option value="9">9</option></select></label>
+        <label>Date window <select id="filter-days" style="margin-left:auto;"><option value="30">Next 30 days</option><option value="60">Next 60 days</option><option value="90">Next 90 days</option><option value="120" selected>Next 120 days</option><option value="180">Next 180 days</option><option value="365">Next 365 days</option></select></label>
+        <label>Lost lookback <select id="filter-lost-days" style="margin-left:auto;"><option value="30">Last 30 days</option><option value="60">Last 60 days</option><option value="90">Last 90 days</option><option value="120">Last 120 days</option><option value="180">Last 180 days</option><option value="365" selected>Last 365 days</option></select></label>
+        <div class="gap-note" style="margin-top:4px;">Toggle layers on/off using the panel in the top-right of the map.</div>
+        <button id="reload-btn" style="margin-top:6px;">Reload data</button>
+      </div>
+    </div>
+    <div class="panel">
+      <h3>Summary</h3>
+      <div class="kv"><span>Total upcoming WOs</span><b id="stat-wos">—</b></div>
+      <div class="kv"><span>Unique cities</span><b id="stat-cities">—</b></div>
+      <div class="kv"><span>Active responders</span><b id="stat-resp">—</b></div>
+      <div class="kv"><span>States touched</span><b id="stat-states">—</b></div>
+    </div>
+    <div class="panel">
+      <h3>Top Hotspots</h3>
+      <div class="sub-label">Top 3 counties</div>
+      <div id="hotspots-counties"></div>
+      <div class="sub-label" style="margin-top:10px;">Top 5 states</div>
+      <div id="hotspots-states"></div>
+    </div>
+    <div class="panel">
+      <h3>Coverage Gaps</h3>
+      <div class="sub-label">Top 3 counties</div>
+      <div id="gaps-counties"></div>
+      <div class="sub-label" style="margin-top:10px;">Top 5 states</div>
+      <div id="gaps-states"></div>
+      <div class="gap-note">Uncovered WOs (no active responder within 150 mi), aggregated by county and state.</div>
+    </div>
+    <div class="panel">
+      <h3>Responder Workload</h3>
+      <div class="sub-label">5 busiest</div>
+      <div id="busy-list"></div>
+      <div class="sub-label" style="margin-top:10px;">5 slowest</div>
+      <div id="slow-list"></div>
+      <div class="gap-note">WOs assigned per schedulable responder within current filters. Excludes managers/SDM and on-leave. Names matched between HubSpot deals and the MASTER sheet.</div>
+    </div>
+    <div class="panel">
+      <h3>Service Coverage</h3>
+      <div id="service-coverage-list"></div>
+      <div class="gap-note">Left number = upcoming WOs needing that service. Right number = schedulable responders qualified for it (excludes managers/SDM and on-leave). Ratio &gt;5 WOs per responder flagged as "stretched".</div>
+    </div>
+    <div class="panel">
+      <h3>Closed Lost Analysis</h3>
+      <div class="kv"><span>Total lost deals</span><b id="stat-lost-count">—</b></div>
+      <div class="kv"><span>Total $ value</span><b id="stat-lost-amount" class="lost-amount">—</b></div>
+      <div class="sub-label" style="margin-top:10px;">Top categories</div>
+      <div id="lost-categories"></div>
+      <div class="sub-label" style="margin-top:10px;">Top reasons</div>
+      <div id="lost-reasons"></div>
+      <div class="sub-label" style="margin-top:10px;">Top hotspots</div>
+      <div id="lost-hotspots"></div>
+      <div class="gap-note">Closed Lost deals across A/E, A/M, EC/S pipelines within the Lost lookback window. Toggle the blue "Closed Lost" layer in the top-right to see locations on the map.</div>
+    </div>
+    <div class="panel warn-panel">
+      <h3>⚠ Warnings</h3>
+      <div id="warnings-list"></div>
+      <div class="gap-note">Issues within the current filter scope. Clear filters to see all.</div>
+    </div>
+  </aside>
+</div>
+<div class="status" id="status">Initializing…</div>
+
+<script>
+// ============================================================
+// CONFIG — adjust if you move the sheet or rename tabs
+// ============================================================
+const SHEET_ID = '14VbFR3dKRCb2LoalZQxTYMSN8g_IXhmCDQci3112D50';
+const WO_FEED_TAB = 'WO_HEAT_FEED';
+const META_TAB = 'WO_HEAT_META';
+const WO_LOST_TAB = 'WO_HEAT_LOST';         // Closed Lost deals (last 365 days), written by WO_Lost_Sync.gs
+const LOST_META_TAB = 'WO_HEAT_LOST_META';
+const RESPONDER_TAB = 'MASTER'; // or 'MAPS EXPORT' depending on which is the cleanest source
+const COVERAGE_RADIUS_MI = 150;
+
+// gviz CSV endpoint (works for any tab in a sheet that's set to "Anyone with the link can view")
+// Optional `range` skips category-label rows. MASTER has IDENTIFICATION/CONTACT/etc on row 1
+// and real column names on row 2, so we use range=A2:Z for it.
+function gvizCsv(sheetName, range) {
+  let url = 'https://docs.google.com/spreadsheets/d/' + SHEET_ID +
+            '/gviz/tq?tqx=out:csv&sheet=' + encodeURIComponent(sheetName);
+  if (range) url += '&range=' + encodeURIComponent(range);
+  return url;
+}
+
+// Service taxonomy: the eight capabilities tracked on the MASTER sheet.
+const SERVICES = ['Audio', 'QN Fit Test', 'QL Fit Test', 'NIOSH/PFT Cert', 'Air Monitor', 'Dosimetry', 'NLS', 'ENLS'];
+
+// Maps the Service dropdown value to (a) responder capability columns on MASTER and
+// (b) the canonical service names detectWoServices() returns. This is what lets the
+// Service filter narrow both responders AND work orders to the same service.
+const SERVICE_FILTER_MAP = {
+  'Audio':     { capKeys: ['Audio'],                       detected: ['Audio'] },
+  'ResFit':    { capKeys: ['QN Fit Test', 'QL Fit Test'],  detected: ['QN Fit Test', 'QL Fit Test'] },
+  'MEQ':       { capKeys: ['NIOSH/PFT Cert'],              detected: ['NIOSH/PFT Cert'] },
+  'Air':       { capKeys: ['Air Monitor'],                 detected: ['Air Monitor'] },
+  'NLS':       { capKeys: ['NLS'],                         detected: ['NLS'] },
+  'ENLS':      { capKeys: ['ENLS'],                        detected: ['ENLS'] },
+  'Dosimetry': { capKeys: ['Dosimetry'],                   detected: ['Dosimetry'] }
+};
+
+function woNeedsService(wo, filterKey) {
+  const m = SERVICE_FILTER_MAP[filterKey];
+  if (!m) return true;
+  const detected = detectWoServices(wo);
+  return m.detected.some(d => detected.indexOf(d) !== -1);
+}
+
+function respHasService(resp, filterKey) {
+  const m = SERVICE_FILTER_MAP[filterKey];
+  if (!m || !resp.caps) return true;
+  return m.capKeys.some(k => resp.caps[k]);
+}
+
+// Region filter: WOs have a State but no Region column. We map state → region using
+// the actual home-state assignments of responders in each region (so MHD's real cuts
+// win), with a US-Census-style fallback for states where no responder lives.
+const REGION_DEFAULTS = {
+  CT:'NE', ME:'NE', MA:'NE', NH:'NE', NJ:'NE', NY:'NE', PA:'NE', RI:'NE', VT:'NE',
+  AL:'SE', AR:'SE', DC:'SE', DE:'SE', FL:'SE', GA:'SE', KY:'SE', LA:'SE', MD:'SE',
+  MS:'SE', NC:'SE', SC:'SE', TN:'SE', VA:'SE', WV:'SE',
+  IL:'C',  IN:'C',  IA:'C',  KS:'C',  MI:'C',  MN:'C',  MO:'C',  NE:'C',  ND:'C',
+  OH:'C',  OK:'C',  SD:'C',  TX:'C',  WI:'C',
+  AK:'W',  AZ:'W',  CA:'W',  CO:'W',  HI:'W',  ID:'W',  MT:'W',  NV:'W',  NM:'W',
+  OR:'W',  UT:'W',  WA:'W',  WY:'W'
+};
+let stateToRegion = Object.assign({}, REGION_DEFAULTS);
+
+function buildStateRegionMap() {
+  stateToRegion = Object.assign({}, REGION_DEFAULTS);
+  const tally = {};
+  respData.forEach(r => {
+    const st = (r.state || '').toUpperCase().trim();
+    const rgRaw = (r.region || '').toUpperCase().trim();
+    if (!st || !rgRaw) return;
+    // Region cell may be e.g. "NE" or "NE Lead" — grab the leading region code.
+    const m = rgRaw.match(/^(NE|SE|W|C)\b/);
+    if (!m) return;
+    const rg = m[1];
+    tally[st] = tally[st] || {};
+    tally[st][rg] = (tally[st][rg] || 0) + 1;
+  });
+  Object.keys(tally).forEach(st => {
+    const best = Object.entries(tally[st]).sort((a, b) => b[1] - a[1])[0];
+    if (best) stateToRegion[st] = best[0];
+  });
+}
+
+function woInRegion(wo, region) {
+  if (!region) return true;
+  const st = (wo.state || '').toUpperCase().trim();
+  return stateToRegion[st] === region;
+}
+
+// HubSpot date properties can come through as epoch ms (string of digits) or ISO date strings.
+function parseWoDate(s) {
+  if (!s) return null;
+  const str = String(s).trim();
+  if (/^\d+$/.test(str)) return new Date(parseInt(str, 10));
+  const d = new Date(str);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+// Detect which of the standard services a WO requires based on deal name + schedule summary.
+function detectWoServices(wo) {
+  const text = ((wo.name || '') + ' ' + (wo.summary || '')).toLowerCase();
+  const out = [];
+  if (/\baudio\b|audiometric/.test(text)) out.push('Audio');
+  if (/\bqn\b|quantitative/.test(text)) out.push('QN Fit Test');
+  if (/\bql\b|qualitative/.test(text)) out.push('QL Fit Test');
+  // Generic "respirator fit" or "fit test" without QN/QL → assume QN (most common)
+  if (out.indexOf('QN Fit Test') === -1 && out.indexOf('QL Fit Test') === -1 &&
+      /respirator fit|fit test/.test(text)) out.push('QN Fit Test');
+  if (/\bmeq\b|medical evaluation/.test(text)) out.push('NIOSH/PFT Cert');
+  if (/air monitor/.test(text)) out.push('Air Monitor');
+  if (/dosimet/.test(text)) out.push('Dosimetry');
+  if (/\benls\b|environmental noise/.test(text)) out.push('ENLS');
+  else if (/\bnls\b|noise level/.test(text)) out.push('NLS');
+  return out;
+}
+
+function yesVal(v) {
+  return (v == null ? '' : String(v)).trim().toLowerCase().startsWith('y');
+}
+
+// Responder classification helpers — used in stats + Service Coverage so that
+// counts reflect only people who actually get scheduled on jobs.
+// Regional Managers and the SDM (pink markers) are visible on the map but are
+// NOT counted in "Active responders" or "qualified responders" coverage figures.
+function isLeadResp(r) {
+  return /Lead|Manager|SDM/i.test(r.region || '') || /Manager|Director|SDM/i.test(r.title || '');
+}
+function isOnLeave(r) {
+  return /leave/i.test(r.notes || '');
+}
+function isSchedulable(r) {
+  return !isOnLeave(r) && !isLeadResp(r);
+}
+
+// Nickname / spelling aliases — both sides normalized to "first last" lowercase.
+// Confirmed by Alex 2026-05-15 (heat-map session). Add new pairs here if more pop up.
+// NOTE: "timothy kelley" → "tim kelly" assumes same person despite last-name spelling
+// difference (Kelley vs Kelly). Worth fixing in HubSpot or MASTER for consistency.
+const RESPONDER_ALIASES = {
+  'robert gilling':   'bob gilling',
+  'bradley kearns':   'brad kearns',
+  'timothy kelley':   'tim kelly',
+  'steven mills':     'steve mills',
+  'donald monteau':   'don monteau',
+  'robert staycoff':  'rob staycoff',
+  'mike flaherty':    'michael flaherty',
+  'anthony phillips': 'tony phillips'
+};
+
+// Responders whose WO assignments should be flagged for reassignment rather than
+// counted in the Responder Workload panel. Keys are HubSpot's spellings, lowercased.
+// Confirmed by Alex 2026-05-15.
+const RESPONDER_FLAGS = {
+  'kameron tracy':  'Sales — not a field responder. Reassign WO.',
+  'stephen brown':  'No longer employed by MHD. Reassign WO.',
+  'ronald denmon':  'No longer employed by MHD. Reassign WO.'
+};
+
+// Normalize a responder name for matching across HubSpot deals ↔ MASTER sheet.
+// HubSpot stores "First Last"; MASTER stores "Last, First". We flip to "First Last",
+// lowercase, collapse whitespace, then apply any nickname alias.
+function normRespName(s) {
+  let str = String(s || '').trim();
+  if (str.indexOf(',') !== -1) {
+    const parts = str.split(',').map(p => p.trim());
+    if (parts.length === 2 && parts[1]) str = parts[1] + ' ' + parts[0];
+  }
+  const lower = str.toLowerCase().replace(/\s+/g, ' ');
+  return RESPONDER_ALIASES[lower] || lower;
+}
+
+// If any responder on a WO is on the flag list, return { name, reason }; else null.
+function findFlaggedResponder(rawValue) {
+  if (!rawValue) return null;
+  const parts = String(rawValue).split(/\s*[\/;]\s*/);
+  for (let i = 0; i < parts.length; i++) {
+    const lower = parts[i].trim().toLowerCase().replace(/\s+/g, ' ');
+    if (RESPONDER_FLAGS[lower]) return { name: parts[i].trim(), reason: RESPONDER_FLAGS[lower] };
+  }
+  return null;
+}
+
+// ============================================================
+// State
+// ============================================================
+let map, woHeatLayer, woMarkerLayer;
+let respActiveLayer, respLeadLayer, respInactiveLayer;
+let lostHeatLayer, lostMarkerLayer;        // Closed Lost layer pair (heat + invisible click targets)
+let woData = [], respData = [], metaData = {};
+let lostData = [], lostMetaData = {};      // Closed Lost feed, populated from WO_HEAT_LOST tab
+
+// ============================================================
+// Init
+// ============================================================
+function initMap() {
+  map = L.map('map', { zoomControl: true, zoomSnap: 0.5 }).setView([39.5, -98.35], 4);
+  // Voyager base — softer cartography with subtle water and land coloring; looks more designed than light_all.
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+    attribution: '© OpenStreetMap contributors © CARTO',
+    subdomains: 'abcd',
+    maxZoom: 19
+  }).addTo(map);
+
+  // ColorBrewer-style red/orange/yellow gradient — smoother transitions, more refined intensity reading.
+  woHeatLayer = L.heatLayer([], {
+    radius: 30, blur: 24, maxZoom: 8, minOpacity: 0.45,
+    gradient: { 0.15: '#fee08b', 0.35: '#fdae61', 0.55: '#f46d43', 0.75: '#d73027', 1.0: '#a50026' }
+  }).addTo(map);
+  woMarkerLayer = L.layerGroup().addTo(map);
+
+  // Closed Lost heat layer — blue gradient. Density-weighted by deal count.
+  // Created here but NOT added by default — user toggles it on via the overlay control.
+  lostHeatLayer = L.heatLayer([], {
+    radius: 28, blur: 22, maxZoom: 8, minOpacity: 0.45,
+    gradient: { 0.15: '#dbeafe', 0.35: '#93c5fd', 0.55: '#3b82f6', 0.75: '#1d4ed8', 1.0: '#1e3a8a' }
+  });
+  lostMarkerLayer = L.layerGroup();   // invisible click targets — only added when lost layer is on
+
+  // Three separate responder layers so each can be toggled independently
+  respActiveLayer = L.layerGroup().addTo(map);
+  respLeadLayer = L.layerGroup().addTo(map);
+  respInactiveLayer = L.layerGroup();   // NOT added by default — user can turn it on
+
+  // Layer toggle control (top-right corner). Keys are HTML so the labels can include color swatches.
+  const overlays = {
+    '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:linear-gradient(135deg,#fee08b 0%,#fdae61 40%,#d73027 80%,#a50026 100%);margin-right:6px;vertical-align:-2px;box-shadow:0 0 0 1px rgba(0,0,0,0.08);"></span> Work Orders (heat)': woHeatLayer,
+    '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:linear-gradient(135deg,#dbeafe 0%,#93c5fd 40%,#3b82f6 80%,#1e3a8a 100%);margin-right:6px;vertical-align:-2px;box-shadow:0 0 0 1px rgba(0,0,0,0.08);"></span> Closed Lost (heat)': lostHeatLayer,
+    '<span style="display:inline-block;width:11px;height:11px;background:#2563eb;border-radius:3px;margin-right:6px;vertical-align:-1px;box-shadow:0 0 0 1px rgba(255,255,255,0.6),0 0 0 2px rgba(37,99,235,0.5);"></span> Safety Responders': respActiveLayer,
+    '<span style="display:inline-block;width:13px;height:13px;background:#ec4899;border-radius:3px;margin-right:6px;vertical-align:-2px;box-shadow:0 0 0 1px rgba(255,255,255,0.6),0 0 0 2px rgba(236,72,153,0.5);"></span> Managers &amp; SDM': respLeadLayer,
+    '<span style="display:inline-block;width:11px;height:11px;background:#9ca3af;border-radius:3px;margin-right:6px;vertical-align:-1px;opacity:0.7;"></span> On Leave (inactive)': respInactiveLayer
+  };
+  L.control.layers(null, overlays, { collapsed: false, position: 'topright' }).addTo(map);
+
+  // Keep the invisible click-target marker layer in sync with the heat layer visibility
+  map.on('overlayremove', e => {
+    if (e.layer === woHeatLayer && map.hasLayer(woMarkerLayer)) map.removeLayer(woMarkerLayer);
+    if (e.layer === lostHeatLayer && map.hasLayer(lostMarkerLayer)) map.removeLayer(lostMarkerLayer);
+  });
+  map.on('overlayadd', e => {
+    if (e.layer === woHeatLayer && !map.hasLayer(woMarkerLayer)) map.addLayer(woMarkerLayer);
+    if (e.layer === lostHeatLayer && !map.hasLayer(lostMarkerLayer)) map.addLayer(lostMarkerLayer);
+  });
+}
+
+async function loadAll() {
+  setStatus('Loading WO + Closed Lost data from Sheet…');
+  try {
+    const [woRows, respRows, metaRows, lostRows, lostMetaRows] = await Promise.all([
+      fetchCsv(gvizCsv(WO_FEED_TAB)),
+      // MASTER has IDENTIFICATION/CONTACT/etc category labels on row 1, real headers on row 2.
+      // Range A2:U skips the category row AND stops at the last real column ("Flags").
+      // (A2:Z used to be the range, but trailing empty header cells V-Z confused PapaParse —
+      // it tried to dedupe duplicate "" headers with _1/_2/.. suffixes and ate the first
+      // data row into a malformed column name, dropping Allison, Terri silently.)
+      fetchCsv(gvizCsv(RESPONDER_TAB, RESPONDER_TAB === 'MASTER' ? 'A2:U' : undefined)),
+      fetchCsv(gvizCsv(META_TAB)).catch(() => []),
+      // Closed Lost feed — falls back to empty array if the tab hasn't been created yet
+      // (e.g. before syncWOLostFeed has been run for the first time).
+      fetchCsv(gvizCsv(WO_LOST_TAB)).catch(() => []),
+      fetchCsv(gvizCsv(LOST_META_TAB)).catch(() => [])
+    ]);
+
+    woData = woRows
+      .map(r => ({
+        wo: r['WO'],
+        name: r['Deal Name'],
+        start: r['Start Date'],
+        address: r['Address'],
+        city: r['City'],
+        county: r['County'] || '',
+        state: r['State'],
+        lat: parseFloat(r['Lat']),
+        lng: parseFloat(r['Lng']),
+        summary: r['Schedule Summary'] || '',
+        responder: r['Responder'] || '',
+        dealUrl: r['Deal URL'] || ''
+      }))
+      .filter(r => r.wo && !isNaN(r.lat) && !isNaN(r.lng));
+
+    respData = respRows
+      .map(r => ({
+        name: r['Name'],
+        region: r['Region'] || '',
+        state: r['Home State'] || '',
+        title: r['Title'] || '',
+        rating: parseInt(r['Svc Rating'] || r['Rating'] || '0', 10) || 0,
+        bilingual: yesVal(r['Bilingual']),
+        notes: r['Notes / Idiosyncrasies'] || r['Notes'] || '',
+        address: r['Address'] || '',
+        lat: parseFloat(r['Lat'] || ''),
+        lng: parseFloat(r['Lng'] || ''),
+        // Capabilities pulled directly from MASTER's "Yes"/blank columns
+        caps: {
+          'Audio': yesVal(r['Audio Certified']),
+          'QN Fit Test': yesVal(r['QN Fit Test']),
+          'QL Fit Test': yesVal(r['QL Fit Test']),
+          'NIOSH/PFT Cert': yesVal(r['NIOSH/PFT Cert']),
+          'Air Monitor': yesVal(r['Air Monitor']),
+          'Dosimetry': yesVal(r['Dosimetry']),
+          'NLS': yesVal(r['NLS']),
+          'ENLS': yesVal(r['ENLS'])
+        }
+      }))
+      .filter(r => r.name);
+
+    metaRows.forEach(r => { metaData[r['Key'] || r[0]] = r['Value'] || r[1]; });
+
+    // Closed Lost rows. The Apps Script geocoder may leave Lat/Lng blank for deals
+    // with neither a parseable service_address nor an extractable zip — filter those
+    // out so they don't break the heat layer. Their counts are still surfaced in
+    // the `WO_HEAT_LOST_META` tab via the `no_location` key.
+    lostData = lostRows
+      .map(r => ({
+        dealId: r['Deal ID'] || '',
+        name: r['Deal Name'] || '',
+        closedate: r['Close Date'] || '',
+        amount: parseFloat(r['Amount']) || 0,
+        category: r['Category'] || '',
+        reason: r['Reason'] || '',
+        address: r['Address'] || '',
+        city: r['City'] || '',
+        county: r['County'] || '',
+        state: r['State'] || '',
+        zip: r['Zip'] || '',
+        lat: parseFloat(r['Lat']),
+        lng: parseFloat(r['Lng']),
+        pipeline: r['Pipeline'] || '',
+        dealUrl: r['Deal URL'] || '',
+        locationSource: r['Location Source'] || ''
+      }))
+      .filter(r => r.dealId && !isNaN(r.lat) && !isNaN(r.lng));
+
+    lostMetaData = {};
+    lostMetaRows.forEach(r => { lostMetaData[r['Key'] || r[0]] = r['Value'] || r[1]; });
+
+    // If responder rows lack lat/lng, geocode their addresses client-side using Nominatim
+    // (one-time, cached in localStorage so reloads are instant).
+    await ensureResponderCoords(respData);
+
+    // Now that respData is loaded, build the state→region map (used by WO region filter).
+    buildStateRegionMap();
+
+    document.getElementById('meta').textContent = buildMetaText();
+    populateResponderDatalist();
+    setStatus('Ready. ' + woData.length + ' WOs · ' + respData.length + ' responders · ' + lostData.length + ' Closed Lost deals.');
+    redraw();
+  } catch (e) {
+    console.error(e);
+    setStatus('Error loading data: ' + e.message + ' — make sure the WO_HEAT_FEED tab is published and the sync has run.');
+  }
+}
+
+function fetchCsv(url) {
+  return new Promise((resolve, reject) => {
+    Papa.parse(url, {
+      download: true,
+      header: true,
+      skipEmptyLines: true,
+      complete: (res) => resolve(res.data),
+      error: reject
+    });
+  });
+}
+
+// Responder address geocoding — Nominatim, rate-limited, localStorage cache
+async function ensureResponderCoords(rows) {
+  const cache = JSON.parse(localStorage.getItem('mhd_resp_geo') || '{}');
+  let updated = false;
+  for (const r of rows) {
+    if (!isNaN(r.lat) && !isNaN(r.lng)) continue; // already geocoded server-side
+    if (!r.address) continue;
+    const key = (r.address || '').toLowerCase();
+    if (cache[key]) {
+      r.lat = cache[key].lat; r.lng = cache[key].lng;
+      continue;
+    }
+    // Extract city, state, zip for cleaner geocoding
+    const m = r.address.match(/^.+?,\s*([^,]+?)\s*,?\s+([A-Z]{2})\s+\d{5}/i);
+    const q = m ? (m[1] + ', ' + m[2] + ', USA') : (r.address + ', USA');
+    try {
+      const u = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=us&q=' + encodeURIComponent(q);
+      const res = await fetch(u, { headers: { 'Accept': 'application/json' } });
+      const data = await res.json();
+      if (data && data[0]) {
+        r.lat = parseFloat(data[0].lat); r.lng = parseFloat(data[0].lon);
+        cache[key] = { lat: r.lat, lng: r.lng };
+        updated = true;
+      }
+    } catch (e) { /* swallow */ }
+    await sleep(1100); // Nominatim 1/sec rate limit
+  }
+  if (updated) localStorage.setItem('mhd_resp_geo', JSON.stringify(cache));
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ============================================================
+// Filters & redraw
+// ============================================================
+function bindControls() {
+  ['filter-service', 'filter-region', 'filter-rating', 'filter-days', 'filter-lost-days']
+    .forEach(id => document.getElementById(id).addEventListener('change', redraw));
+  document.getElementById('reload-btn').addEventListener('click', () => {
+    setStatus('Reloading…');
+    loadAll();
+  });
+
+  // ===== Search: ZIP code =====
+  const zipInput = document.getElementById('zip-search');
+  const zipGo = document.getElementById('zip-go');
+  zipGo.addEventListener('click', searchZip);
+  zipInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); searchZip(); } });
+
+  // ===== Search: Responder =====
+  const respInput = document.getElementById('resp-search');
+  respInput.addEventListener('change', searchResponder);
+  // Most browsers fire 'input' when a datalist option is clicked; check for exact name match.
+  respInput.addEventListener('input', () => {
+    const v = respInput.value.trim();
+    if (v && respData.some(r => r.name && r.name.toLowerCase() === v.toLowerCase())) {
+      searchResponder();
+    }
+  });
+
+  document.getElementById('clear-search').addEventListener('click', clearSearch);
+}
+
+// ===== Search helpers =====
+let searchMarker = null;
+
+function populateResponderDatalist() {
+  const dl = document.getElementById('resp-names');
+  // Sort by last name for browsing
+  const sorted = respData.slice().sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  dl.innerHTML = sorted.map(r => `<option value="${escapeHtml(r.name)}">`).join('');
+}
+
+async function searchZip() {
+  const zip = (document.getElementById('zip-search').value || '').trim();
+  if (!/^\d{5}$/.test(zip)) {
+    setStatus('Enter a 5-digit ZIP code.');
+    return;
+  }
+  setStatus('Looking up ZIP ' + zip + '…');
+  const cache = JSON.parse(localStorage.getItem('mhd_zip_cache') || '{}');
+  let geo = cache[zip];
+  if (!geo) {
+    try {
+      const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=us&postalcode=' + zip;
+      const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+      const data = await res.json();
+      if (!data || !data.length) {
+        setStatus('No location found for ZIP ' + zip + '.');
+        return;
+      }
+      geo = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+      cache[zip] = geo;
+      localStorage.setItem('mhd_zip_cache', JSON.stringify(cache));
+    } catch (e) {
+      setStatus('ZIP lookup failed: ' + (e.message || e));
+      return;
+    }
+  }
+  flyToWithMarker(geo.lat, geo.lng, 'ZIP ' + zip, 10);
+  reportNearby(geo.lat, geo.lng, 'ZIP ' + zip);
+}
+
+function searchResponder() {
+  const v = (document.getElementById('resp-search').value || '').trim();
+  if (!v) return;
+  const r = respData.find(x => x.name && x.name.toLowerCase() === v.toLowerCase());
+  if (!r) {
+    setStatus('No responder matching "' + v + '". Pick one from the suggestions.');
+    return;
+  }
+  if (isNaN(r.lat) || isNaN(r.lng)) {
+    setStatus(r.name + ' has no location yet. Wait for geocoding to finish, then try again.');
+    return;
+  }
+  flyToWithMarker(r.lat, r.lng, r.name, 9);
+  // Open the responder's own popup after the fly animation
+  setTimeout(() => {
+    respMarkerLayer.eachLayer(m => {
+      const ll = m.getLatLng();
+      if (Math.abs(ll.lat - r.lat) < 0.001 && Math.abs(ll.lng - r.lng) < 0.001) {
+        m.openPopup();
+      }
+    });
+  }, 700);
+}
+
+function flyToWithMarker(lat, lng, label, zoom) {
+  if (searchMarker) map.removeLayer(searchMarker);
+  searchMarker = L.marker([lat, lng], {
+    icon: L.divIcon({
+      className: '',
+      html: '<div style="background:#222;color:#fff;padding:3px 9px;border-radius:3px;font-size:11px;font-weight:500;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.3);">' + escapeHtml(label) + '</div>',
+      iconSize: [120, 22],
+      iconAnchor: [10, 11]
+    }),
+    keyboard: false,
+    interactive: false
+  }).addTo(map);
+  map.flyTo([lat, lng], zoom || 9, { duration: 0.8 });
+  document.getElementById('clear-search').style.display = '';
+  setStatus('Showing ' + label);
+}
+
+function reportNearby(lat, lng, label) {
+  // Count nearby WOs and responders within 50 miles of the search point
+  const nearWOs = woData.filter(w => !isNaN(w.lat) && distMiles(lat, lng, w.lat, w.lng) < 50).length;
+  const nearResp = respData.filter(r => !isNaN(r.lat) && !/leave/i.test(r.notes || '') && distMiles(lat, lng, r.lat, r.lng) < 50).length;
+  setStatus(label + ' — ' + nearWOs + ' WO' + (nearWOs === 1 ? '' : 's') + ' and ' + nearResp + ' active responder' + (nearResp === 1 ? '' : 's') + ' within 50 mi.');
+}
+
+function clearSearch() {
+  if (searchMarker) { map.removeLayer(searchMarker); searchMarker = null; }
+  document.getElementById('zip-search').value = '';
+  document.getElementById('resp-search').value = '';
+  document.getElementById('clear-search').style.display = 'none';
+  map.flyTo([39.5, -98.35], 4, { duration: 0.6 });
+  setStatus('Cleared search. ' + woData.length + ' WOs · ' + respData.length + ' responders.');
+}
+
+function redraw() {
+  // Keep fService in its canonical case (e.g. "NLS") — the cap-key & detected-services lookups
+  // in SERVICE_FILTER_MAP / detectWoServices are case-sensitive.
+  const fService = document.getElementById('filter-service').value;
+  const fRegion = document.getElementById('filter-region').value;
+  const fRating = parseInt(document.getElementById('filter-rating').value, 10) || 0;
+  const fDays = parseInt(document.getElementById('filter-days').value, 10) || 120;
+
+  // Date window: today → today + fDays. WOs without a parseable date are kept (safer than dropping).
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const cutoff = new Date(today.getTime() + fDays * 86400000);
+
+  // WOs respect service + region + date-window so the heat + hotspots match the responder view.
+  const filteredWOs = woData.filter(w => {
+    if (fService && !woNeedsService(w, fService)) return false;
+    if (fRegion && !woInRegion(w, fRegion)) return false;
+    const d = parseWoDate(w.start);
+    if (d && (d < today || d > cutoff)) return false;
+    return true;
+  });
+
+  // Update header subtitle so it reflects the current window
+  document.getElementById('meta').textContent = buildMetaText(fDays);
+
+  // Aggregate WOs by city for hotspots + heat intensity
+  const byCity = {};
+  filteredWOs.forEach(w => {
+    const k = (w.city + '|' + w.state).toLowerCase();
+    if (!byCity[k]) byCity[k] = { city: w.city, state: w.state, lat: w.lat, lng: w.lng, wos: [] };
+    byCity[k].wos.push(w);
+  });
+  const cities = Object.values(byCity).sort((a, b) => b.wos.length - a.wos.length);
+
+  // WO heat layer + invisible click targets — layer visibility is controlled by the Leaflet layer toggle.
+  woHeatLayer.setLatLngs(cities.map(c => [c.lat, c.lng, c.wos.length]));
+  woMarkerLayer.clearLayers();
+  cities.forEach(c => {
+    const m = L.circleMarker([c.lat, c.lng], {
+      radius: 4 + Math.sqrt(c.wos.length) * 2,
+      color: '#7a0d05', weight: 1, fillColor: '#d62e1f', fillOpacity: 0.0
+    });
+    m.bindPopup(buildWoPopup(c), { maxWidth: 320 });
+    m.addTo(woMarkerLayer);
+  });
+
+  // Responder filter — region + rating + service capability.
+  // (Leave status is handled by the layer toggle, not here.)
+  const filteredResp = respData.filter(r => {
+    if (fRegion && r.region.indexOf(fRegion) === -1) return false;
+    if (fRating && r.rating < fRating) return false;
+    if (fService && !respHasService(r, fService)) return false;
+    return true;
+  });
+
+  // Split into three layers based on lead/leave status. The layer control toggles visibility.
+  respActiveLayer.clearLayers();
+  respLeadLayer.clearLayers();
+  respInactiveLayer.clearLayers();
+  filteredResp.forEach(r => {
+    if (isNaN(r.lat) || isNaN(r.lng)) return;
+    const lead = isLeadResp(r);
+    const inactive = isOnLeave(r);
+    const icon = L.divIcon({
+      className: 'resp-marker' + (lead ? ' lead' : '') + (inactive ? ' inactive' : ''),
+      iconSize: [lead ? 16 : 11, lead ? 16 : 11],
+      iconAnchor: [lead ? 8 : 5.5, lead ? 8 : 5.5]
+    });
+    const marker = L.marker([r.lat, r.lng], { icon: icon });
+    marker.bindPopup(buildRespPopup(r), { maxWidth: 280 });
+    if (inactive) marker.addTo(respInactiveLayer);
+    else if (lead) marker.addTo(respLeadLayer);
+    else marker.addTo(respActiveLayer);
+  });
+
+  // Stats
+  document.getElementById('stat-wos').textContent = filteredWOs.length;
+  document.getElementById('stat-cities').textContent = cities.length;
+  // Active responders = schedulable only (excludes managers, SDM, on-leave).
+  // Managers/SDM remain visible on the map as pink markers.
+  document.getElementById('stat-resp').textContent = filteredResp.filter(isSchedulable).length;
+  document.getElementById('stat-states').textContent = new Set(cities.map(c => c.state)).size;
+
+  // ===== Aggregate by county + state (used for both Hotspots and Coverage Gaps panels) =====
+  const woByCounty = {}, woByState = {};
+  filteredWOs.forEach(w => {
+    if (w.county && w.state) {
+      const k = w.county + '|' + w.state;
+      woByCounty[k] = woByCounty[k] || { county: w.county, state: w.state, n: 0 };
+      woByCounty[k].n++;
+    }
+    if (w.state) {
+      woByState[w.state] = woByState[w.state] || { state: w.state, n: 0 };
+      woByState[w.state].n++;
+    }
+  });
+  const topCounties = Object.values(woByCounty).sort((a, b) => b.n - a.n).slice(0, 3);
+  const topStates   = Object.values(woByState).sort((a, b) => b.n - a.n).slice(0, 5);
+
+  document.getElementById('hotspots-counties').innerHTML = topCounties.length > 0
+    ? topCounties.map(c => `<div class="row"><span class="count">${c.n}</span><span class="where">${escapeHtml(c.county)}, ${escapeHtml(c.state)}</span></div>`).join('')
+    : '<div class="gap-note">No county data yet — run the sync.</div>';
+  document.getElementById('hotspots-states').innerHTML = topStates.length > 0
+    ? topStates.map(s => `<div class="row"><span class="count">${s.n}</span><span class="where">${escapeHtml(s.state)}</span></div>`).join('')
+    : '<div class="gap-note">No matches</div>';
+
+  // ===== Coverage gaps: aggregate uncovered WOs by county + state =====
+  // "Uncovered" = no active responder within 150 mi of that WO's location.
+  const activeResp = filteredResp.filter(r => !/leave/i.test(r.notes || '') && !isNaN(r.lat) && !isNaN(r.lng));
+  const uncoveredWOs = filteredWOs.filter(w => {
+    if (isNaN(w.lat) || isNaN(w.lng)) return false;
+    return !activeResp.some(r => distMiles(w.lat, w.lng, r.lat, r.lng) < COVERAGE_RADIUS_MI);
+  });
+  const gapByCounty = {}, gapByState = {};
+  uncoveredWOs.forEach(w => {
+    if (w.county && w.state) {
+      const k = w.county + '|' + w.state;
+      gapByCounty[k] = gapByCounty[k] || { county: w.county, state: w.state, n: 0 };
+      gapByCounty[k].n++;
+    }
+    if (w.state) {
+      gapByState[w.state] = gapByState[w.state] || { state: w.state, n: 0 };
+      gapByState[w.state].n++;
+    }
+  });
+  const topGapCounties = Object.values(gapByCounty).sort((a, b) => b.n - a.n).slice(0, 3);
+  const topGapStates   = Object.values(gapByState).sort((a, b) => b.n - a.n).slice(0, 5);
+
+  document.getElementById('gaps-counties').innerHTML = topGapCounties.length > 0
+    ? topGapCounties.map(c => `<div class="row"><span class="count">${c.n}</span><span class="where">${escapeHtml(c.county)}, ${escapeHtml(c.state)}</span></div>`).join('')
+    : '<div class="gap-note">No gaps with current filters.</div>';
+  document.getElementById('gaps-states').innerHTML = topGapStates.length > 0
+    ? topGapStates.map(s => `<div class="row"><span class="count">${s.n}</span><span class="where">${escapeHtml(s.state)}</span></div>`).join('')
+    : '<div class="gap-note">No gaps with current filters.</div>';
+
+  // ===== Responder Workload (busiest / slowest) =====
+  // WO counts per schedulable responder, matched by normalized name between the
+  // WO row's `responder` field and the MASTER roster. Slowest list intentionally
+  // includes 0-WO responders so we surface under-utilization.
+  const respCounts = new Map();   // normName → { name: displayName, n: woCount }
+  filteredResp.filter(isSchedulable).forEach(r => {
+    if (!r.name) return;
+    respCounts.set(normRespName(r.name), { name: r.name, n: 0 });
+  });
+  filteredWOs.forEach(w => {
+    if (!w.responder) return;
+    // Apps Script joins multi-responder values with " / "; older rows may have ";".
+    w.responder.split(/\s*[\/;]\s*/).forEach(part => {
+      const key = normRespName(part);
+      if (!key) return;
+      const entry = respCounts.get(key);
+      if (entry) entry.n++;
+    });
+  });
+  const respList = Array.from(respCounts.values());
+  const busiest = respList.slice()
+    .sort((a, b) => b.n - a.n || a.name.localeCompare(b.name))
+    .slice(0, 5);
+  const slowest = respList.slice()
+    .sort((a, b) => a.n - b.n || a.name.localeCompare(b.name))
+    .slice(0, 5);
+  document.getElementById('busy-list').innerHTML = busiest.length > 0
+    ? busiest.map(r => `<div class="row"><span class="count">${r.n}</span><span class="where">${escapeHtml(r.name)}</span></div>`).join('')
+    : '<div class="gap-note">No responders match current filters.</div>';
+  document.getElementById('slow-list').innerHTML = slowest.length > 0
+    ? slowest.map(r => `<div class="row"><span class="count">${r.n}</span><span class="where">${escapeHtml(r.name)}</span></div>`).join('')
+    : '<div class="gap-note">No responders match current filters.</div>';
+
+  // ===== Service Coverage =====
+  // For each service: count upcoming WOs requiring it, and count active responders qualified for it.
+  // Deliberately ignores the Service dropdown (we want the panel to keep showing ALL services even
+  // when one is selected) but still respects Region + Rating so the picture matches the scope.
+  const allUpcomingWOs = woData.filter(w => {
+    if (fRegion && !woInRegion(w, fRegion)) return false;
+    const d = parseWoDate(w.start);
+    if (d && (d < today || d > cutoff)) return false;
+    return true;
+  });
+  const respForCoverage = respData.filter(r => {
+    if (fRegion && r.region.indexOf(fRegion) === -1) return false;
+    if (fRating && r.rating < fRating) return false;
+    return true;
+  });
+  // Qualified-responder count for each service excludes managers/SDM (we don't schedule them).
+  const activeQualifiedBase = respForCoverage.filter(isSchedulable);
+  const coverage = SERVICES.map(svc => {
+    let woCount = 0;
+    allUpcomingWOs.forEach(w => { if (detectWoServices(w).indexOf(svc) !== -1) woCount++; });
+    const qualifiedCount = activeQualifiedBase.filter(r => r.caps && r.caps[svc]).length;
+    return { svc: svc, wos: woCount, resp: qualifiedCount };
+  }).filter(c => c.wos > 0 || c.resp > 0);
+
+  document.getElementById('service-coverage-list').innerHTML = coverage.length > 0
+    ? coverage.map(c => {
+        let supplyCls = '';
+        let label = c.resp + ' resp';
+        if (c.wos > 0 && c.resp === 0) { supplyCls = 'gap'; label = '0 resp ⚠'; }
+        else if (c.resp > 0 && c.wos / c.resp > 5) { supplyCls = 'stretched'; label = c.resp + ' resp (stretched)'; }
+        return `<div class="row"><span class="count">${c.wos}</span><span class="where">${escapeHtml(c.svc)}</span><span class="svc-supply ${supplyCls}">${label}</span></div>`;
+      }).join('')
+    : '<div class="gap-note">No service data.</div>';
+
+  // ===== Closed Lost layer + analysis =====
+  // Uses its own lookback dropdown (independent of the WO forward date window).
+  // Respects Region and Service filters so the picture matches the rest of the view.
+  // Rating filter intentionally ignored — it's responder-related, not relevant to lost deals.
+  const fLostDays = parseInt(document.getElementById('filter-lost-days').value, 10) || 365;
+  const lostCutoff = new Date(today.getTime() - fLostDays * 86400000);
+  const filteredLost = lostData.filter(l => {
+    if (fRegion && !woInRegion(l, fRegion)) return false;
+    if (fService && !woNeedsService({ name: l.name, summary: l.reason }, fService)) return false;
+    const d = parseWoDate(l.closedate);
+    if (d && (d < lostCutoff || d > today)) return false;
+    return true;
+  });
+
+  // Aggregate Closed Lost by city for the blue heat layer + invisible click targets.
+  const lostByCity = {};
+  filteredLost.forEach(l => {
+    const k = (l.city + '|' + l.state).toLowerCase();
+    if (!lostByCity[k]) lostByCity[k] = { city: l.city, state: l.state, lat: l.lat, lng: l.lng, deals: [] };
+    lostByCity[k].deals.push(l);
+  });
+  const lostCities = Object.values(lostByCity).sort((a, b) => b.deals.length - a.deals.length);
+
+  lostHeatLayer.setLatLngs(lostCities.map(c => [c.lat, c.lng, c.deals.length]));
+  lostMarkerLayer.clearLayers();
+  lostCities.forEach(c => {
+    const m = L.circleMarker([c.lat, c.lng], {
+      radius: 4 + Math.sqrt(c.deals.length) * 2,
+      color: '#1e3a8a', weight: 1, fillColor: '#3b82f6', fillOpacity: 0.0
+    });
+    m.bindPopup(buildLostPopup(c), { maxWidth: 360 });
+    m.addTo(lostMarkerLayer);
+  });
+
+  // Aggregate counts/totals for the right-side panel.
+  const lostTotal = filteredLost.length;
+  const lostAmountTotal = filteredLost.reduce((sum, l) => sum + (l.amount || 0), 0);
+  const catTally = {};
+  const reasonTally = {};
+  filteredLost.forEach(l => {
+    const cat = (l.category || '').trim() || '(no category)';
+    catTally[cat] = (catTally[cat] || 0) + 1;
+    // For reasons, normalize whitespace and cap length for tally grouping
+    const reasonRaw = (l.reason || '').trim();
+    const reason = reasonRaw ? (reasonRaw.length > 60 ? reasonRaw.substring(0, 60) + '…' : reasonRaw) : '(no reason)';
+    reasonTally[reason] = (reasonTally[reason] || 0) + 1;
+  });
+  const topCats = Object.entries(catTally).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const topReasons = Object.entries(reasonTally).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const lostHotspots = lostCities.slice(0, 5);
+
+  document.getElementById('stat-lost-count').textContent = lostTotal;
+  document.getElementById('stat-lost-amount').textContent = lostAmountTotal > 0
+    ? '$' + lostAmountTotal.toLocaleString('en-US', { maximumFractionDigits: 0 })
+    : '—';
+  document.getElementById('lost-categories').innerHTML = topCats.length > 0
+    ? topCats.map(c => `<div class="row"><span class="count lost">${c[1]}</span><span class="where">${escapeHtml(c[0])}</span></div>`).join('')
+    : '<div class="gap-note">No Closed Lost deals in current view.</div>';
+  document.getElementById('lost-reasons').innerHTML = topReasons.length > 0
+    ? topReasons.map(r => `<div class="row"><span class="count lost">${r[1]}</span><span class="where">${escapeHtml(r[0])}</span></div>`).join('')
+    : '<div class="gap-note">No reasons recorded.</div>';
+  document.getElementById('lost-hotspots').innerHTML = lostHotspots.length > 0
+    ? lostHotspots.map(c => `<div class="row"><span class="count lost">${c.deals.length}</span><span class="where">${escapeHtml(c.city)}, ${escapeHtml(c.state)}</span></div>`).join('')
+    : '<div class="gap-note">No locations to highlight.</div>';
+
+  // ===== Warnings =====
+  // Surfaces any data-quality / assignment issues for the current filter scope so Alex
+  // can spot WOs that need attention. Each category is rendered only if it has hits.
+  const warnings = [];
+
+  // 1. WOs assigned to flagged responders (ex-employees, sales) → reassignment needed.
+  const reassignWOs = filteredWOs
+    .map(w => ({ w: w, flag: findFlaggedResponder(w.responder) }))
+    .filter(x => x.flag);
+  if (reassignWOs.length > 0) {
+    warnings.push({
+      title: reassignWOs.length + ' WO' + (reassignWOs.length > 1 ? 's' : '') + ' need reassignment',
+      items: reassignWOs.slice(0, 5).map(x => ({
+        label: 'WO ' + x.w.wo + ' — ' + x.flag.name,
+        sub: x.flag.reason + (x.w.city ? ' (' + x.w.city + ', ' + x.w.state + ')' : ''),
+        url: x.w.dealUrl
+      })),
+      moreCount: Math.max(0, reassignWOs.length - 5)
+    });
+  }
+
+  // 2. WOs with no assigned responder.
+  const unassignedWOs = filteredWOs.filter(w => !(w.responder || '').trim());
+  if (unassignedWOs.length > 0) {
+    warnings.push({
+      title: unassignedWOs.length + ' WO' + (unassignedWOs.length > 1 ? 's' : '') + ' missing a responder',
+      items: unassignedWOs.slice(0, 5).map(w => ({
+        label: 'WO ' + w.wo + (w.city ? ' — ' + w.city + ', ' + w.state : ''),
+        sub: (w.name || '').substring(0, 70),
+        url: w.dealUrl
+      })),
+      moreCount: Math.max(0, unassignedWOs.length - 5)
+    });
+  }
+
+  // 3. Unknown HubSpot responder names — not in MASTER (after format flip + alias),
+  //    not in RESPONDER_FLAGS. Indicates a new responder to add, or a new alias to map.
+  const masterNorms = new Set(respData.map(r => normRespName(r.name)).filter(Boolean));
+  const unknownNames = new Map(); // normForm → { display, count }
+  filteredWOs.forEach(w => {
+    if (!w.responder) return;
+    w.responder.split(/\s*[\/;]\s*/).forEach(part => {
+      const display = part.trim();
+      if (!display) return;
+      const flatLower = display.toLowerCase().replace(/\s+/g, ' ');
+      if (RESPONDER_FLAGS[flatLower]) return;
+      const n = normRespName(display);
+      if (masterNorms.has(n)) return;
+      if (!unknownNames.has(n)) unknownNames.set(n, { display: display, count: 0 });
+      unknownNames.get(n).count++;
+    });
+  });
+  if (unknownNames.size > 0) {
+    const list = Array.from(unknownNames.values()).sort((a, b) => b.count - a.count);
+    warnings.push({
+      title: unknownNames.size + ' unknown responder name' + (unknownNames.size > 1 ? 's' : ''),
+      items: list.slice(0, 5).map(u => ({
+        label: '"' + u.display + '"',
+        sub: u.count + ' WO' + (u.count > 1 ? 's' : '') + ' — add to MASTER or RESPONDER_ALIASES'
+      })),
+      moreCount: Math.max(0, list.length - 5)
+    });
+  }
+
+  // Render
+  document.getElementById('warnings-list').innerHTML = warnings.length > 0
+    ? warnings.map(w => {
+        const items = w.items.map(it => {
+          const lbl = it.url
+            ? `<a href="${escapeHtml(it.url)}" target="_blank" rel="noopener">${escapeHtml(it.label)} ↗</a>`
+            : escapeHtml(it.label);
+          const sub = it.sub ? `<div class="sub">${escapeHtml(it.sub)}</div>` : '';
+          return `<div class="warn-row"><span class="lbl">${lbl}</span>${sub}</div>`;
+        }).join('');
+        const more = w.moreCount > 0 ? `<div class="warn-more">+ ${w.moreCount} more</div>` : '';
+        return `<div class="warn-section"><div class="warn-section-title">${escapeHtml(w.title)}</div>${items}${more}</div>`;
+      }).join('')
+    : '<div class="warn-ok">✓ No warnings in current view.</div>';
+}
+
+// ============================================================
+// Helpers
+// ============================================================
+function extractZip(address) {
+  if (!address) return '';
+  const m = address.match(/(\d{5})(?:-\d{4})?\s*$/);
+  return m ? m[1] : '';
+}
+
+function buildWoPopup(c) {
+  const items = c.wos.slice(0, 6).map(w => {
+    const zip = extractZip(w.address);
+    const zipBit = zip ? ` · <span style="color:#666">ZIP ${zip}</span>` : '';
+    // WO # is a clickable link to the deal in HubSpot when we have a URL; otherwise plain text.
+    const woLabel = w.dealUrl
+      ? `<a href="${escapeHtml(w.dealUrl)}" target="_blank" rel="noopener" style="color:#b91c1c;text-decoration:none;font-weight:600;">WO ${escapeHtml(w.wo)} ↗</a>`
+      : `<b>WO ${escapeHtml(w.wo)}</b>`;
+    // If the assigned responder is flagged (sales / ex-employee), render a red callout
+    // so Alex can spot it and reassign instead of a plain Responder line.
+    const flag = findFlaggedResponder(w.responder);
+    const respBit = !w.responder
+      ? ''
+      : (flag
+          ? `<div style="margin-top:3px;font-size:12px;background:#fef2f2;border-left:3px solid #b91c1c;padding:4px 8px;border-radius:3px;"><b style="color:#b91c1c;">⚠ Reassign:</b> ${escapeHtml(w.responder)}<div style="color:#7a0d05;font-size:11px;margin-top:1px;">${escapeHtml(flag.reason)}</div></div>`
+          : `<div style="margin-top:2px;font-size:12px;"><b style="color:#374151;">Responder:</b> <span style="color:#1f2937;">${escapeHtml(w.responder)}</span></div>`);
+    // Confirmed Schedule Summary — capped for popup readability.
+    const sumText = (w.summary || '').trim();
+    const sumBit = sumText
+      ? `<div class="sub" style="margin-top:3px;font-style:italic;line-height:1.4;">${escapeHtml(sumText.length > 220 ? sumText.substring(0, 220) + '…' : sumText)}</div>`
+      : '';
+    return `<li style="margin-bottom:8px;">${woLabel} · ${escapeHtml(w.start)}${zipBit}<br><span class="sub">${escapeHtml((w.name || '').substring(0, 100))}</span>${respBit}${sumBit}</li>`;
+  }).join('');
+  const more = c.wos.length > 6 ? `<div class="sub">+ ${c.wos.length - 6} more</div>` : '';
+  return `<h4>${escapeHtml(c.city)}, ${escapeHtml(c.state)} — ${c.wos.length} WO${c.wos.length > 1 ? 's' : ''}</h4><ul style="padding-left:16px;">${items}</ul>${more}`;
+}
+
+function buildLostPopup(c) {
+  // Cluster popup: one entry per Closed Lost deal in this city.
+  // Capped at 8 visible items + a "+ N more" tail to keep popups readable.
+  const totalAmount = c.deals.reduce((sum, d) => sum + (d.amount || 0), 0);
+  const totalLabel = totalAmount > 0
+    ? ' · <span class="lost-amount">$' + totalAmount.toLocaleString('en-US', { maximumFractionDigits: 0 }) + '</span>'
+    : '';
+  const items = c.deals.slice(0, 8).map(d => {
+    const amt = d.amount > 0
+      ? '<span class="lost-amount">$' + d.amount.toLocaleString('en-US', { maximumFractionDigits: 0 }) + '</span>'
+      : '<span class="sub">no amount</span>';
+    const nameLabel = d.dealUrl
+      ? `<a href="${escapeHtml(d.dealUrl)}" target="_blank" rel="noopener" style="color:#1e40af;text-decoration:none;font-weight:600;">${escapeHtml(d.name || 'Untitled')} ↗</a>`
+      : `<b>${escapeHtml(d.name || 'Untitled')}</b>`;
+    const catBit = d.category
+      ? `<span class="lost-pill">${escapeHtml(d.category)}</span>`
+      : '';
+    const reasonBit = d.reason
+      ? `<div class="sub" style="margin-top:3px;font-style:italic;line-height:1.4;">${escapeHtml(d.reason.length > 200 ? d.reason.substring(0, 200) + '…' : d.reason)}</div>`
+      : '';
+    const closeBit = d.closedate ? `<span class="sub">${escapeHtml(formatLostDate(d.closedate))}</span>` : '';
+    const pipelineBit = d.pipeline ? ` · <span class="sub">${escapeHtml(d.pipeline)}</span>` : '';
+    return `<li style="margin-bottom:9px;">${nameLabel}<br>${catBit}${amt} · ${closeBit}${pipelineBit}${reasonBit}</li>`;
+  }).join('');
+  const more = c.deals.length > 8 ? `<div class="sub">+ ${c.deals.length - 8} more</div>` : '';
+  return `<h4 style="color:#1e40af;">Lost in ${escapeHtml(c.city)}, ${escapeHtml(c.state)} — ${c.deals.length} deal${c.deals.length > 1 ? 's' : ''}${totalLabel}</h4><ul style="padding-left:16px;margin-top:6px;">${items}</ul>${more}`;
+}
+
+// Format an epoch-ms-or-ISO close date for human display in the popup.
+// Returns YYYY-MM-DD which matches the rest of the page's date formatting.
+function formatLostDate(s) {
+  const d = parseWoDate(s);
+  if (!d) return String(s);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return y + '-' + m + '-' + day;
+}
+
+function buildRespPopup(r) {
+  const bits = [r.title, 'Region ' + r.region, 'Rating ' + r.rating, r.bilingual ? 'Bilingual' : null]
+    .filter(Boolean).map(escapeHtml).join(' · ');
+  const certs = r.caps ? SERVICES.filter(s => r.caps[s]) : [];
+  const capsLine = certs.length > 0
+    ? `<div style="margin-top:4px;"><b style="font-size:11px;color:#444;">Certified:</b> <span class="sub">${certs.map(escapeHtml).join(', ')}</span></div>`
+    : '<div class="sub" style="margin-top:4px;">No capabilities listed.</div>';
+  return `<h4>${escapeHtml(r.name)}</h4><div class="sub">${escapeHtml(r.state)}</div><div>${bits}</div>${capsLine}${r.notes ? `<div class="sub" style="margin-top:4px;font-style:italic">${escapeHtml(r.notes)}</div>` : ''}`;
+}
+
+function distMiles(lat1, lng1, lat2, lng2) {
+  const R = 3959, toRad = d => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1), dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.asin(Math.sqrt(a));
+}
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+}
+
+function buildMetaText(days) {
+  const upd = metaData['updated_at'] || '(unknown)';
+  const d = days || 120;
+  return 'Window: today → +' + d + ' days · Sheet last synced: ' + upd;
+}
+
+function setStatus(msg) { document.getElementById('status').textContent = msg; }
+
+// ============================================================
+// Go
+// ============================================================
+initMap();
+bindControls();
+loadAll();
+</script>
+</body>
+</html>

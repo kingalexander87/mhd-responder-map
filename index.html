@@ -144,7 +144,7 @@ input:checked+.slider:before{transform:translateX(16px)}
 <script>
 const API_KEY  = "AIzaSyCXalP4vszPKPOVN9Y5pzNbfjJjF4VN7VY";
 const SHEET_ID = "14VbFR3dKRCb2LoalZQxTYMSN8g_IXhmCDQci3112D50";
-const SHEET_URL = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/MASTER!A3:U200?key=${API_KEY}`;
+const SHEET_URL = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/MASTER!A3:V200?key=${API_KEY}`;
 const RATING_COLORS = {7:"#1E8449",6:"#27AE60",5:"#F4D03F",4:"#E67E22",3:"#E74C3C"};
 const COORDS = {
   "Allison, Terri":    {lat:29.5572,lng:-95.7835},
@@ -194,22 +194,22 @@ function isRM(t){ return t.title&&t.title.toLowerCase().includes("regional manag
 function isSDM(t){ return t.title&&t.title.toLowerCase().includes("service delivery"); }
 function parseServices(row){
   const s=[];
-  if(row[8]==="Yes") s.push("Audio");
-  if(row[10]==="Yes") s.push("QN Fit");
-  if(row[11]==="Yes") s.push("QL Fit");
-  if(row[12]==="Yes") s.push("PFT");
-  if(row[14]==="Yes") s.push("Air Monitor");
-  if(row[15]==="Yes") s.push("Dosimetry");
-  if(row[16]==="Yes") s.push("NLS");
-  if(row[17]==="Yes") s.push("ENLS");
+  if(row[9]==="Yes") s.push("Audio");
+  if(row[11]==="Yes") s.push("QN Fit");
+  if(row[12]==="Yes") s.push("QL Fit");
+  if(row[13]==="Yes") s.push("PFT");
+  if(row[15]==="Yes") s.push("Air Monitor");
+  if(row[16]==="Yes") s.push("Dosimetry");
+  if(row[17]==="Yes") s.push("NLS");
+  if(row[18]==="Yes") s.push("ENLS");
   return s;
 }
 function techFromRow(row){
   return {
-    name:row[0]||"",region:row[1]||"",state:row[2]||"",bilingual:row[3]||"",
-    title:row[4]||"",phone:row[5]||"",email:row[6]||"",address:row[7]||"",
-    audExp:row[9]||"",nioshExp:row[13]||"",rating:parseInt(row[18])||0,
-    notes:row[19]||"",flags:row[20]||"",services:parseServices(row),
+    name:row[0]||"",region:row[1]||"",state:row[2]||"",srtm:row[3]||"",bilingual:row[4]||"",
+    title:row[5]||"",phone:row[6]||"",email:row[7]||"",address:row[8]||"",
+    audExp:row[10]||"",nioshExp:row[14]||"",rating:parseInt(row[19])||0,
+    notes:row[20]||"",flags:row[21]||"",services:parseServices(row),
   };
 }
 async function loadData(){
@@ -271,6 +271,7 @@ function makeMarker(tech){
     <div style="font-family:Arial;font-size:12px;max-width:250px;line-height:1.5">
       <div style="font-weight:700;font-size:14px;color:${rc};margin-bottom:3px">${tech.name} ${inactiveBadge}</div>
       <div style="color:#555;margin-bottom:5px">${tech.title}${tech.region?' &middot; '+tech.region:''}</div>
+      ${tech.srtm?`<div style="color:#777;font-size:11px;margin-bottom:5px">SRTM: <strong>${tech.srtm}</strong></div>`:''}
       <div style="margin-bottom:5px"><strong>Rating:</strong> <span style="color:${RATING_COLORS[tech.rating]||'#999'};font-weight:700;font-size:14px">${tech.rating}/7</span></div>
       ${tech.phone?`<div style="margin-bottom:2px">&#128222; <a href="tel:${tech.phone}" style="color:#1F3864">${tech.phone}</a></div>`:''}
       ${tech.email?`<div style="margin-bottom:5px;word-break:break-all">&#9993; <a href="mailto:${tech.email}" style="color:#1F3864">${tech.email}</a></div>`:''}
@@ -352,7 +353,6 @@ function selectResponder(name){
   const match=markers.find(({tech})=>tech.name===name);
   if(!match) return;
   const {marker,tech}=match;
-  // Clear name filter so the selected marker is visible
   document.getElementById('search').value='';
   applyFilters();
   marker.setVisible(true);
@@ -377,7 +377,6 @@ async function findNearest(){
     const stateAbbr=d.places[0]['state abbreviation']||'';
     const locLabel=placeName?`${placeName}, ${stateAbbr}`:zip;
 
-    // Drop a pin at the exact searched zip code location
     clearSearchMarker();
     searchMarker=new google.maps.Marker({
       position:{lat,lng},
@@ -405,7 +404,6 @@ async function findNearest(){
 
     const showInactive=document.getElementById('toggle-inactive').checked;
     const service=document.getElementById('f-service').value;
-    // Exclude Regional Managers and Service Delivery Managers; respect Service filter if set
     const ranked=markers
       .filter(({tech})=>COORDS[tech.name]&&(showInactive||!isInactive(tech))&&!isRM(tech)&&!isSDM(tech)&&(!service||tech.services.includes(service)))
       .map(({tech})=>({...tech,dist:haversine(lat,lng,COORDS[tech.name].lat,COORDS[tech.name].lng)}))
@@ -423,6 +421,7 @@ async function findNearest(){
       <div class="zip-row">
         <span class="${cls}">${t.name}${tooltip}</span><span class="zip-dist">${t.dist} mi</span>
         <div class="zip-detail">${t.title} &middot; Rating ${t.rating}/7 &middot; ${t.region}</div>
+        ${t.srtm?`<div class="zip-detail">SRTM: <strong>${t.srtm}</strong></div>`:''}
         <div class="zip-detail">${t.phone||'No phone on file'}</div>
         <div>${t.services.slice(0,4).map(s=>`<span class="badge">${s}</span>`).join('')}${t.services.length>4?`<span class="badge">+${t.services.length-4}</span>`:''}${isInactive(t)?`<span class="badge inactive-badge">On Leave</span>`:''}</div>
         <div><a class="zip-directions" href="${directionsURL(t)}" target="_blank" rel="noopener">&#129517; Get Directions</a></div>
@@ -430,8 +429,8 @@ async function findNearest(){
     document.getElementById('zip-results').style.display='block';
     map.setZoom(7);
     map.panTo({lat,lng});
-    // Offset the map so the dropped pin sits below the results panel, not behind it
-    map.panBy(0,-170);
+    // Offset the map so the dropped pin sits to the right of the results panel, not behind it
+    map.panBy(-210,0);
   }catch(e){alert('Error geocoding zip code.');}
 }
 async function initMap(){

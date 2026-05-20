@@ -328,8 +328,9 @@ function clearSearchMarker(){
 }
 function directionsURL(tech){
   const coords=COORDS[tech.name];
-  const dest=tech.address?tech.address:(coords?`${coords.lat},${coords.lng}`:tech.name);
-  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(dest)}`;
+  const origin=tech.address?tech.address:(coords?`${coords.lat},${coords.lng}`:tech.name);
+  // Pre-fill the responder as the start location; leave destination blank so user picks the work order address
+  return `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(origin)}`;
 }
 function focusResponderFromList(name){
   const match=markers.find(({tech})=>tech.name===name);

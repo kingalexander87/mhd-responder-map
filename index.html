@@ -39,8 +39,10 @@ input:checked+.slider:before{transform:translateX(16px)}
 #zip-results-header{background:#1F3864;color:#fff;padding:10px 14px;border-radius:8px 8px 0 0;display:flex;justify-content:space-between;align-items:center;font-size:13px;font-weight:700}
 #zip-close{cursor:pointer;font-size:18px;line-height:1}
 #zip-results-body{padding:10px 14px}
-.zip-row{padding:8px 0;border-bottom:1px solid #f0f0f0;font-size:12px}
+.zip-row{padding:8px 10px;margin:0 -10px;border-bottom:1px solid #f0f0f0;font-size:12px;cursor:pointer;transition:background 0.15s}
 .zip-row:last-child{border-bottom:none}
+.zip-row:hover{background:#f5f9fc}
+.zip-row.selected{background:#E8F4FD;box-shadow:inset 3px 0 0 #27AE60}
 .zip-name{font-weight:700;color:#1F3864;font-size:13px;position:relative;display:inline-block}
 .zip-name.has-info{cursor:help;border-bottom:1px dotted #888}
 .zip-tooltip{display:none;position:absolute;left:0;top:calc(100% + 8px);background:#1F3864;color:#fff;padding:8px 11px;border-radius:5px;font-size:11px;font-weight:400;white-space:normal;width:260px;z-index:200;box-shadow:0 3px 12px rgba(0,0,0,0.3);line-height:1.45;pointer-events:none}
@@ -169,7 +171,7 @@ const COORDS = {
   "Johnson, Curtis":   {lat:26.0056,lng:-80.2534},
   "Jones, Dan":        {lat:35.5829,lng:-78.7997},
   "Kearns, Brad":      {lat:47.2793,lng:-122.2284},
-  "Kelley, Tim":        {lat:40.0918,lng:-82.6835},
+  "Kelley, Tim":       {lat:40.0918,lng:-82.6835},
   "McFarland, Ryan":   {lat:35.2271,lng:-80.8431},
   "Mills, Steve":      {lat:38.9498,lng:-76.1947},
   "Monteau, Don":      {lat:30.7974,lng:-81.6957},
@@ -188,7 +190,7 @@ const COORDS = {
   "Werner, Thomas":    {lat:31.7093,lng:-99.0018},
   "Whicker, Steven":   {lat:39.7084,lng:-86.3027},
 };
-let map, allTechs=[], markers=[], openInfoWindow=null, searchMarker=null, searchInfoWindow=null;
+let map, allTechs=[], markers=[], openInfoWindow=null, searchMarker=null, searchInfoWindow=null, lastSearchedLoc=null;
 function isInactive(t){ return t.notes&&t.notes.toLowerCase().includes("on leave"); }
 function isRM(t){ return t.title&&t.title.toLowerCase().includes("regional manager"); }
 function isSDM(t){ return t.title&&t.title.toLowerCase().includes("service delivery"); }
@@ -329,6 +331,35 @@ function directionsURL(tech){
   const dest=tech.address?tech.address:(coords?`${coords.lat},${coords.lng}`:tech.name);
   return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(dest)}`;
 }
+function focusResponderFromList(name){
+  const match=markers.find(({tech})=>tech.name===name);
+  if(!match) return;
+  const {marker,tech}=match;
+  const coords=COORDS[tech.name];
+  if(!coords) return;
+  marker.setVisible(true);
+  // Highlight the selected row in the panel
+  document.querySelectorAll('#zip-results-body .zip-row').forEach(r=>r.classList.remove('selected'));
+  const row=document.querySelector(`#zip-results-body .zip-row[data-name="${CSS.escape(name)}"]`);
+  if(row) row.classList.add('selected');
+  // Fit map to show BOTH the searched zip pin and the responder, keeping them right of the centered panel
+  if(lastSearchedLoc){
+    const bounds=new google.maps.LatLngBounds();
+    bounds.extend(new google.maps.LatLng(lastSearchedLoc.lat,lastSearchedLoc.lng));
+    bounds.extend(new google.maps.LatLng(coords.lat,coords.lng));
+    const mapDiv=document.getElementById('map');
+    const mapWidth=mapDiv?mapDiv.clientWidth:1000;
+    const padLeft=Math.min(Math.floor(mapWidth*0.55),Math.floor(mapWidth/2)+200);
+    map.fitBounds(bounds,{top:80,right:60,bottom:80,left:padLeft});
+  }else{
+    map.panTo(coords);
+    map.setZoom(9);
+  }
+  if(openInfoWindow) openInfoWindow.close();
+  google.maps.event.trigger(marker,'click');
+  marker.setAnimation(google.maps.Animation.BOUNCE);
+  setTimeout(()=>marker.setAnimation(null),1400);
+}
 function showNameDropdown(){
   const q=document.getElementById('search').value.toLowerCase().trim();
   const dd=document.getElementById('name-dropdown');
@@ -373,6 +404,7 @@ async function findNearest(){
     const d=await r.json();
     const lat=parseFloat(d.places[0].latitude);
     const lng=parseFloat(d.places[0].longitude);
+    lastSearchedLoc={lat,lng};
     const placeName=d.places[0]['place name']||'';
     const stateAbbr=d.places[0]['state abbreviation']||'';
     const locLabel=placeName?`${placeName}, ${stateAbbr}`:zip;
@@ -417,8 +449,9 @@ async function findNearest(){
       if(t.flags) parts.push(`<div class="zip-tooltip-flag"><span class="zip-tooltip-label">FLAGS</span>${escHtml(t.flags)}</div>`);
       const tooltip=hasInfo?`<span class="zip-tooltip">${parts.join('')}</span>`:'';
       const cls=hasInfo?'zip-name has-info':'zip-name';
+      const nameAttr=escHtml(t.name);
       return `
-      <div class="zip-row">
+      <div class="zip-row" data-name="${nameAttr}">
         <span class="${cls}">${t.name}${tooltip}</span><span class="zip-dist">${t.dist} mi</span>
         <div class="zip-detail">${t.title} &middot; Rating ${t.rating}/7 &middot; ${t.region}</div>
         ${t.srtm?`<div class="zip-detail">SRTM: <strong>${t.srtm}</strong></div>`:''}
@@ -429,7 +462,6 @@ async function findNearest(){
     document.getElementById('zip-results').style.display='block';
     map.setZoom(7);
     map.panTo({lat,lng});
-    // Offset the map so the dropped pin sits to the right of the results panel, not behind it
     map.panBy(-210,0);
   }catch(e){alert('Error geocoding zip code.');}
 }
@@ -460,6 +492,14 @@ async function initMap(){
   document.getElementById('zip-close').addEventListener('click',()=>{
     document.getElementById('zip-results').style.display='none';
     clearSearchMarker();
+    lastSearchedLoc=null;
+  });
+  document.getElementById('zip-results-body').addEventListener('click',e=>{
+    if(e.target.closest('.zip-directions')) return;
+    const row=e.target.closest('.zip-row');
+    if(!row) return;
+    const name=row.getAttribute('data-name');
+    if(name) focusResponderFromList(name);
   });
   map.addListener('click',()=>{if(openInfoWindow){openInfoWindow.close();openInfoWindow=null;}});
 }

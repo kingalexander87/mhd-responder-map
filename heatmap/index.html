@@ -75,11 +75,18 @@ aside .panel:last-child { margin-bottom: 0; }
 .legend-swatch { width: 14px; height: 14px; border-radius: 50%; box-shadow: 0 0 0 1px rgba(0,0,0,0.06); }
 .legend-swatch.wo { background: linear-gradient(135deg, #fee08b 0%, #fdae61 40%, #d73027 80%, #a50026 100%); }
 .legend-swatch.lost { background: linear-gradient(135deg, #dbeafe 0%, #93c5fd 40%, #3b82f6 80%, #1e3a8a 100%); }
+.legend-swatch.new { background: linear-gradient(135deg, #dcfce7 0%, #86efac 40%, #22c55e 80%, #14532d 100%); }
+.legend-swatch.cwon { background: linear-gradient(135deg, #fef3c7 0%, #fde68a 40%, #d97706 80%, #92400e 100%); }
+.legend-swatch.rebook { background: linear-gradient(135deg, #ede9fe 0%, #c4b5fd 40%, #8b5cf6 80%, #3b0764 100%); }
+.legend-swatch.ecns { background: linear-gradient(135deg, #ccfbf1 0%, #5eead4 40%, #14b8a6 80%, #134e4a 100%); }
 .legend-swatch.resp { background: var(--responder); border-radius: 3px; box-shadow: 0 0 0 1px rgba(255,255,255,0.4), 0 0 0 2px rgba(37,99,235,0.5); }
 .legend-swatch.lead { background: var(--lead); border-radius: 3px; box-shadow: 0 0 0 1px rgba(255,255,255,0.4), 0 0 0 2px rgba(236,72,153,0.5); }
 .lost-pill { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 10px; font-weight: 600; background: #dbeafe; color: #1e40af; margin-right: 4px; }
 .lost-amount { color: #1e3a8a; font-weight: 600; font-variant-numeric: tabular-nums; }
 .row .count.lost { color: #1e40af; }
+.new-pill { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 10px; font-weight: 600; background: #dcfce7; color: #14532d; margin-right: 4px; }
+.new-amount { color: #14532d; font-weight: 600; font-variant-numeric: tabular-nums; }
+.row .count.new { color: #15803d; }
 .status { font-size: 11px; color: var(--muted); padding: 8px 20px; background: var(--panel); border-top: 1px solid var(--border); font-variant-numeric: tabular-nums; }
 @media (max-width: 900px) {
   .layout { grid-template-columns: 1fr; }
@@ -118,6 +125,10 @@ aside .panel:last-child { margin-bottom: 0; }
   <div class="legend">
     <div class="legend-item"><span class="legend-swatch wo"></span> WO density</div>
     <div class="legend-item"><span class="legend-swatch lost"></span> Closed Lost</div>
+    <div class="legend-item"><span class="legend-swatch new"></span> New Business</div>
+    <div class="legend-item"><span class="legend-swatch cwon"></span> Closed Won</div>
+    <div class="legend-item"><span class="legend-swatch rebook"></span> Rebook</div>
+    <div class="legend-item"><span class="legend-swatch ecns"></span> ECNS</div>
     <div class="legend-item"><span class="legend-swatch resp"></span> Responder</div>
     <div class="legend-item"><span class="legend-swatch lead"></span> Lead / Mgr</div>
   </div>
@@ -146,6 +157,7 @@ aside .panel:last-child { margin-bottom: 0; }
         <label>Min responder rating <select id="filter-rating" style="margin-left:auto;"><option value="0">Any</option><option value="6">6+</option><option value="7">7+</option><option value="8">8+</option><option value="9">9</option></select></label>
         <label>Date window <select id="filter-days" style="margin-left:auto;"><option value="30">Next 30 days</option><option value="60">Next 60 days</option><option value="90">Next 90 days</option><option value="120" selected>Next 120 days</option><option value="180">Next 180 days</option><option value="365">Next 365 days</option></select></label>
         <label>Lost lookback <select id="filter-lost-days" style="margin-left:auto;"><option value="30">Last 30 days</option><option value="60">Last 60 days</option><option value="90">Last 90 days</option><option value="120">Last 120 days</option><option value="180">Last 180 days</option><option value="365" selected>Last 365 days</option></select></label>
+        <label>New biz lookback <select id="filter-new-days" style="margin-left:auto;"><option value="30">Last 30 days</option><option value="60">Last 60 days</option><option value="90">Last 90 days</option><option value="120">Last 120 days</option><option value="180">Last 180 days</option><option value="365" selected>Last 365 days</option></select></label>
         <div class="gap-note" style="margin-top:4px;">Toggle layers on/off using the panel in the top-right of the map.</div>
         <button id="reload-btn" style="margin-top:6px;">Reload data</button>
       </div>
@@ -197,6 +209,16 @@ aside .panel:last-child { margin-bottom: 0; }
       <div id="lost-hotspots"></div>
       <div class="gap-note">Closed Lost deals across A/E, A/M, EC/S pipelines within the Lost lookback window. Toggle the blue "Closed Lost" layer in the top-right to see locations on the map.</div>
     </div>
+    <div class="panel">
+      <h3>New Business Analysis</h3>
+      <div class="kv"><span>Total new deals</span><b id="stat-new-count">—</b></div>
+      <div class="kv"><span>Total pipeline $</span><b id="stat-new-amount" class="new-amount">—</b></div>
+      <div class="sub-label" style="margin-top:10px;">Breakdown by stage</div>
+      <div id="new-stages"></div>
+      <div class="sub-label" style="margin-top:10px;">Top hotspots</div>
+      <div id="new-hotspots"></div>
+      <div class="gap-note">All deals with `dealtype = New Business` and a createdate inside the New biz lookback window — open + closed/won + closed/lost. Toggle the green "New Business" layer in the top-right to see locations on the map.</div>
+    </div>
     <div class="panel warn-panel">
       <h3>⚠ Warnings</h3>
       <div id="warnings-list"></div>
@@ -215,6 +237,13 @@ const WO_FEED_TAB = 'WO_HEAT_FEED';
 const META_TAB = 'WO_HEAT_META';
 const WO_LOST_TAB = 'WO_HEAT_LOST';         // Closed Lost deals (last 365 days), written by WO_Lost_Sync.gs
 const LOST_META_TAB = 'WO_HEAT_LOST_META';
+const WO_NEW_TAB = 'WO_HEAT_NEW';           // New Business deals (last 365 days), written by WO_New_Sync.gs
+const NEW_META_TAB = 'WO_HEAT_NEW_META';
+// Phase 1 (forecasting) feeds populated by apps_script_wo_heat_sync.gs.
+// Each is independent of the existing WO_HEAT_NEW / WO_HEAT_LOST tabs.
+const CLOSED_WON_FEED_TAB = 'CLOSED_WON_FEED';   // 3-yr historical Closed Won (weekly sync)
+const REBOOK_FEED_TAB     = 'REBOOK_FEED';       // A/M Renewal pipeline — open deals (hourly)
+const ECNS_FEED_TAB       = 'ECNS_FEED';         // E.C.N.S. pipeline — open deals (hourly)
 const RESPONDER_TAB = 'MASTER'; // or 'MAPS EXPORT' depending on which is the cleanest source
 const COVERAGE_RADIUS_MI = 150;
 
@@ -396,8 +425,15 @@ function findFlaggedResponder(rawValue) {
 let map, woHeatLayer, woMarkerLayer;
 let respActiveLayer, respLeadLayer, respInactiveLayer;
 let lostHeatLayer, lostMarkerLayer;        // Closed Lost layer pair (heat + invisible click targets)
+let newHeatLayer, newMarkerLayer;          // New Business layer pair (heat + invisible click targets)
 let woData = [], respData = [], metaData = {};
 let lostData = [], lostMetaData = {};      // Closed Lost feed, populated from WO_HEAT_LOST tab
+let newData = [], newMetaData = {};        // New Business feed, populated from WO_HEAT_NEW tab
+// Forecasting layers (Phase 1 feeds from apps_script_wo_heat_sync.gs).
+let cwonData = [], rebookData = [], ecnsData = [];
+let cwonHeatLayer, cwonMarkerLayer;        // Closed Won historical (gold gradient)
+let rebookHeatLayer, rebookMarkerLayer;    // Rebook open pipeline (purple gradient)
+let ecnsHeatLayer, ecnsMarkerLayer;        // ECNS open pipeline (teal gradient)
 
 // ============================================================
 // Init
@@ -426,6 +462,34 @@ function initMap() {
   });
   lostMarkerLayer = L.layerGroup();   // invisible click targets — only added when lost layer is on
 
+  // New Business heat layer — green gradient. Same pattern as Closed Lost.
+  newHeatLayer = L.heatLayer([], {
+    radius: 28, blur: 22, maxZoom: 8, minOpacity: 0.45,
+    gradient: { 0.15: '#dcfce7', 0.35: '#86efac', 0.55: '#22c55e', 0.75: '#15803d', 1.0: '#14532d' }
+  });
+  newMarkerLayer = L.layerGroup();
+
+  // Closed Won historical heat layer — gold/amber gradient. Money won.
+  cwonHeatLayer = L.heatLayer([], {
+    radius: 28, blur: 22, maxZoom: 8, minOpacity: 0.45,
+    gradient: { 0.15: '#fef3c7', 0.35: '#fde68a', 0.55: '#fbbf24', 0.75: '#d97706', 1.0: '#92400e' }
+  });
+  cwonMarkerLayer = L.layerGroup();
+
+  // Rebook (A/M Renewal) open pipeline — purple gradient. Repeat customers.
+  rebookHeatLayer = L.heatLayer([], {
+    radius: 28, blur: 22, maxZoom: 8, minOpacity: 0.45,
+    gradient: { 0.15: '#ede9fe', 0.35: '#c4b5fd', 0.55: '#8b5cf6', 0.75: '#6d28d9', 1.0: '#3b0764' }
+  });
+  rebookMarkerLayer = L.layerGroup();
+
+  // ECNS open pipeline — teal gradient. Existing-customer expansion.
+  ecnsHeatLayer = L.heatLayer([], {
+    radius: 28, blur: 22, maxZoom: 8, minOpacity: 0.45,
+    gradient: { 0.15: '#ccfbf1', 0.35: '#5eead4', 0.55: '#14b8a6', 0.75: '#0f766e', 1.0: '#134e4a' }
+  });
+  ecnsMarkerLayer = L.layerGroup();
+
   // Three separate responder layers so each can be toggled independently
   respActiveLayer = L.layerGroup().addTo(map);
   respLeadLayer = L.layerGroup().addTo(map);
@@ -435,6 +499,10 @@ function initMap() {
   const overlays = {
     '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:linear-gradient(135deg,#fee08b 0%,#fdae61 40%,#d73027 80%,#a50026 100%);margin-right:6px;vertical-align:-2px;box-shadow:0 0 0 1px rgba(0,0,0,0.08);"></span> Work Orders (heat)': woHeatLayer,
     '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:linear-gradient(135deg,#dbeafe 0%,#93c5fd 40%,#3b82f6 80%,#1e3a8a 100%);margin-right:6px;vertical-align:-2px;box-shadow:0 0 0 1px rgba(0,0,0,0.08);"></span> Closed Lost (heat)': lostHeatLayer,
+    '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:linear-gradient(135deg,#dcfce7 0%,#86efac 40%,#22c55e 80%,#14532d 100%);margin-right:6px;vertical-align:-2px;box-shadow:0 0 0 1px rgba(0,0,0,0.08);"></span> New Business (heat)': newHeatLayer,
+    '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:linear-gradient(135deg,#fef3c7 0%,#fde68a 40%,#d97706 80%,#92400e 100%);margin-right:6px;vertical-align:-2px;box-shadow:0 0 0 1px rgba(0,0,0,0.08);"></span> Closed Won (heat)': cwonHeatLayer,
+    '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:linear-gradient(135deg,#ede9fe 0%,#c4b5fd 40%,#8b5cf6 80%,#3b0764 100%);margin-right:6px;vertical-align:-2px;box-shadow:0 0 0 1px rgba(0,0,0,0.08);"></span> Rebook (heat)': rebookHeatLayer,
+    '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:linear-gradient(135deg,#ccfbf1 0%,#5eead4 40%,#14b8a6 80%,#134e4a 100%);margin-right:6px;vertical-align:-2px;box-shadow:0 0 0 1px rgba(0,0,0,0.08);"></span> ECNS (heat)': ecnsHeatLayer,
     '<span style="display:inline-block;width:11px;height:11px;background:#2563eb;border-radius:3px;margin-right:6px;vertical-align:-1px;box-shadow:0 0 0 1px rgba(255,255,255,0.6),0 0 0 2px rgba(37,99,235,0.5);"></span> Safety Responders': respActiveLayer,
     '<span style="display:inline-block;width:13px;height:13px;background:#ec4899;border-radius:3px;margin-right:6px;vertical-align:-2px;box-shadow:0 0 0 1px rgba(255,255,255,0.6),0 0 0 2px rgba(236,72,153,0.5);"></span> Managers &amp; SDM': respLeadLayer,
     '<span style="display:inline-block;width:11px;height:11px;background:#9ca3af;border-radius:3px;margin-right:6px;vertical-align:-1px;opacity:0.7;"></span> On Leave (inactive)': respInactiveLayer
@@ -445,17 +513,26 @@ function initMap() {
   map.on('overlayremove', e => {
     if (e.layer === woHeatLayer && map.hasLayer(woMarkerLayer)) map.removeLayer(woMarkerLayer);
     if (e.layer === lostHeatLayer && map.hasLayer(lostMarkerLayer)) map.removeLayer(lostMarkerLayer);
+    if (e.layer === newHeatLayer && map.hasLayer(newMarkerLayer)) map.removeLayer(newMarkerLayer);
+    if (e.layer === cwonHeatLayer && map.hasLayer(cwonMarkerLayer)) map.removeLayer(cwonMarkerLayer);
+    if (e.layer === rebookHeatLayer && map.hasLayer(rebookMarkerLayer)) map.removeLayer(rebookMarkerLayer);
+    if (e.layer === ecnsHeatLayer && map.hasLayer(ecnsMarkerLayer)) map.removeLayer(ecnsMarkerLayer);
   });
   map.on('overlayadd', e => {
     if (e.layer === woHeatLayer && !map.hasLayer(woMarkerLayer)) map.addLayer(woMarkerLayer);
     if (e.layer === lostHeatLayer && !map.hasLayer(lostMarkerLayer)) map.addLayer(lostMarkerLayer);
+    if (e.layer === newHeatLayer && !map.hasLayer(newMarkerLayer)) map.addLayer(newMarkerLayer);
+    if (e.layer === cwonHeatLayer && !map.hasLayer(cwonMarkerLayer)) map.addLayer(cwonMarkerLayer);
+    if (e.layer === rebookHeatLayer && !map.hasLayer(rebookMarkerLayer)) map.addLayer(rebookMarkerLayer);
+    if (e.layer === ecnsHeatLayer && !map.hasLayer(ecnsMarkerLayer)) map.addLayer(ecnsMarkerLayer);
   });
 }
 
 async function loadAll() {
-  setStatus('Loading WO + Closed Lost data from Sheet…');
+  setStatus('Loading WO + Closed Lost + New Business data from Sheet…');
   try {
-    const [woRows, respRows, metaRows, lostRows, lostMetaRows] = await Promise.all([
+    const [woRows, respRows, metaRows, lostRows, lostMetaRows, newRows, newMetaRows,
+           cwonRows, rebookRows, ecnsRows] = await Promise.all([
       fetchCsv(gvizCsv(WO_FEED_TAB)),
       // MASTER has IDENTIFICATION/CONTACT/etc category labels on row 1, real headers on row 2.
       // Range A2:U skips the category row AND stops at the last real column ("Flags").
@@ -467,7 +544,15 @@ async function loadAll() {
       // Closed Lost feed — falls back to empty array if the tab hasn't been created yet
       // (e.g. before syncWOLostFeed has been run for the first time).
       fetchCsv(gvizCsv(WO_LOST_TAB)).catch(() => []),
-      fetchCsv(gvizCsv(LOST_META_TAB)).catch(() => [])
+      fetchCsv(gvizCsv(LOST_META_TAB)).catch(() => []),
+      // New Business feed — same defensive fallback as Closed Lost.
+      fetchCsv(gvizCsv(WO_NEW_TAB)).catch(() => []),
+      fetchCsv(gvizCsv(NEW_META_TAB)).catch(() => []),
+      // Forecasting feeds — defensive fallback so the page still loads if a tab is
+      // empty / not yet created by the new Apps Script syncs.
+      fetchCsv(gvizCsv(CLOSED_WON_FEED_TAB)).catch(() => []),
+      fetchCsv(gvizCsv(REBOOK_FEED_TAB)).catch(() => []),
+      fetchCsv(gvizCsv(ECNS_FEED_TAB)).catch(() => [])
     ]);
 
     woData = woRows
@@ -543,6 +628,65 @@ async function loadAll() {
     lostMetaData = {};
     lostMetaRows.forEach(r => { lostMetaData[r['Key'] || r[0]] = r['Value'] || r[1]; });
 
+    // New Business rows. Same shape and geocoding behavior as Closed Lost rows;
+    // additionally carries `stage` (human-readable label resolved server-side
+    // via the HubSpot Pipelines API) and `stageId`.
+    newData = newRows
+      .map(r => ({
+        dealId: r['Deal ID'] || '',
+        name: r['Deal Name'] || '',
+        createdate: r['Create Date'] || '',
+        closedate: r['Close Date'] || '',
+        amount: parseFloat(r['Amount']) || 0,
+        stage: r['Stage'] || '',
+        stageId: r['Stage ID'] || '',
+        pipeline: r['Pipeline'] || '',
+        address: r['Address'] || '',
+        city: r['City'] || '',
+        county: r['County'] || '',
+        state: r['State'] || '',
+        zip: r['Zip'] || '',
+        lat: parseFloat(r['Lat']),
+        lng: parseFloat(r['Lng']),
+        dealUrl: r['Deal URL'] || '',
+        locationSource: r['Location Source'] || ''
+      }))
+      .filter(r => r.dealId && !isNaN(r.lat) && !isNaN(r.lng));
+
+    newMetaData = {};
+    newMetaRows.forEach(r => { newMetaData[r['Key'] || r[0]] = r['Value'] || r[1]; });
+
+    // Forecasting feeds — same row shape from writeFeedExtended_ in apps_script_wo_heat_sync.gs.
+    // Three tabs, same parser. Rows without lat/lng are skipped (can't be heatmapped).
+    function parseForecastRow(r) {
+      return {
+        wo: r['WO'] || '',
+        name: r['Deal Name'] || '',
+        pipeline: r['Pipeline'] || '',
+        stage: r['Stage'] || '',
+        createdate: r['Created Date'] || '',
+        start: r['Start Date'] || '',
+        closedate: r['Close Date'] || '',
+        amount: parseFloat(r['Amount']) || 0,
+        techs: parseFloat(r['# Techs']) || 0,
+        testingDays: parseFloat(r['Testing Days']) || 0,
+        employees: parseFloat(r['# Employees']) || 0,
+        address: r['Address'] || '',
+        city: r['City'] || '',
+        county: r['County'] || '',
+        state: r['State'] || '',
+        lat: parseFloat(r['Lat']),
+        lng: parseFloat(r['Lng']),
+        summary: r['Schedule Summary'] || '',
+        responder: r['Responder'] || '',
+        dealId: r['Deal ID'] || '',
+        dealUrl: r['Deal URL'] || ''
+      };
+    }
+    cwonData   = cwonRows.map(parseForecastRow).filter(r => r.dealId && !isNaN(r.lat) && !isNaN(r.lng));
+    rebookData = rebookRows.map(parseForecastRow).filter(r => r.dealId && !isNaN(r.lat) && !isNaN(r.lng));
+    ecnsData   = ecnsRows.map(parseForecastRow).filter(r => r.dealId && !isNaN(r.lat) && !isNaN(r.lng));
+
     // If responder rows lack lat/lng, geocode their addresses client-side using Nominatim
     // (one-time, cached in localStorage so reloads are instant).
     await ensureResponderCoords(respData);
@@ -552,7 +696,10 @@ async function loadAll() {
 
     document.getElementById('meta').textContent = buildMetaText();
     populateResponderDatalist();
-    setStatus('Ready. ' + woData.length + ' WOs · ' + respData.length + ' responders · ' + lostData.length + ' Closed Lost deals.');
+    setStatus('Ready. ' + woData.length + ' WOs · ' + respData.length + ' responders · ' +
+              lostData.length + ' Closed Lost · ' + newData.length + ' New Business · ' +
+              cwonData.length + ' Closed Won (3yr) · ' + rebookData.length + ' Rebook · ' +
+              ecnsData.length + ' ECNS.');
     redraw();
   } catch (e) {
     console.error(e);
@@ -608,7 +755,7 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 // Filters & redraw
 // ============================================================
 function bindControls() {
-  ['filter-service', 'filter-region', 'filter-rating', 'filter-days', 'filter-lost-days']
+  ['filter-service', 'filter-region', 'filter-rating', 'filter-days', 'filter-lost-days', 'filter-new-days']
     .forEach(id => document.getElementById(id).addEventListener('change', redraw));
   document.getElementById('reload-btn').addEventListener('click', () => {
     setStatus('Reloading…');
@@ -998,6 +1145,115 @@ function redraw() {
     ? lostHotspots.map(c => `<div class="row"><span class="count lost">${c.deals.length}</span><span class="where">${escapeHtml(c.city)}, ${escapeHtml(c.state)}</span></div>`).join('')
     : '<div class="gap-note">No locations to highlight.</div>';
 
+  // ===== New Business layer + analysis =====
+  // Uses its own lookback dropdown (independent of WO and Closed Lost windows).
+  // Respects Region filter so the picture matches the rest of the view.
+  // Service and Rating filters intentionally ignored — new deals don't yet have a
+  // confirmed service list, and Rating is responder-related.
+  const fNewDays = parseInt(document.getElementById('filter-new-days').value, 10) || 365;
+  const newCutoff = new Date(today.getTime() - fNewDays * 86400000);
+  const filteredNew = newData.filter(n => {
+    if (fRegion && !woInRegion(n, fRegion)) return false;
+    const d = parseWoDate(n.createdate);
+    if (d && (d < newCutoff || d > today)) return false;
+    return true;
+  });
+
+  // Aggregate by city for the green heat layer + invisible click targets
+  const newByCity = {};
+  filteredNew.forEach(n => {
+    const k = (n.city + '|' + n.state).toLowerCase();
+    if (!newByCity[k]) newByCity[k] = { city: n.city, state: n.state, lat: n.lat, lng: n.lng, deals: [] };
+    newByCity[k].deals.push(n);
+  });
+  const newCities = Object.values(newByCity).sort((a, b) => b.deals.length - a.deals.length);
+
+  newHeatLayer.setLatLngs(newCities.map(c => [c.lat, c.lng, c.deals.length]));
+  newMarkerLayer.clearLayers();
+  newCities.forEach(c => {
+    const m = L.circleMarker([c.lat, c.lng], {
+      radius: 4 + Math.sqrt(c.deals.length) * 2,
+      color: '#14532d', weight: 1, fillColor: '#22c55e', fillOpacity: 0.0
+    });
+    m.bindPopup(buildNewPopup(c), { maxWidth: 360 });
+    m.addTo(newMarkerLayer);
+  });
+
+  // Right-panel aggregates
+  const newTotal = filteredNew.length;
+  const newAmountTotal = filteredNew.reduce((sum, n) => sum + (n.amount || 0), 0);
+  const stageTally = {};
+  filteredNew.forEach(n => {
+    const stage = (n.stage || '').trim() || '(no stage)';
+    if (!stageTally[stage]) stageTally[stage] = { count: 0, amount: 0 };
+    stageTally[stage].count++;
+    stageTally[stage].amount += (n.amount || 0);
+  });
+  // Sort stages by deal count desc. Show ALL stages with at least one deal so the
+  // funnel breakdown stays complete (matches Alex's "see counts in each stage" ask).
+  const stageBreakdown = Object.entries(stageTally)
+    .sort((a, b) => b[1].count - a[1].count);
+
+  document.getElementById('stat-new-count').textContent = newTotal;
+  document.getElementById('stat-new-amount').textContent = newAmountTotal > 0
+    ? '$' + newAmountTotal.toLocaleString('en-US', { maximumFractionDigits: 0 })
+    : '—';
+  document.getElementById('new-stages').innerHTML = stageBreakdown.length > 0
+    ? stageBreakdown.map(s => `<div class="row"><span class="count new">${s[1].count}</span><span class="where">${escapeHtml(s[0])}</span></div>`).join('')
+    : '<div class="gap-note">No new business deals in current view.</div>';
+  document.getElementById('new-hotspots').innerHTML = newCities.length > 0
+    ? newCities.slice(0, 5).map(c => `<div class="row"><span class="count new">${c.deals.length}</span><span class="where">${escapeHtml(c.city)}, ${escapeHtml(c.state)}</span></div>`).join('')
+    : '<div class="gap-note">No locations to highlight.</div>';
+
+  // ===== Forecasting layers (Closed Won historical / Rebook / ECNS) =====
+  // Each layer respects Region and Service filters. Closed Won additionally respects
+  // a "Closed Won lookback" filter so the heat reflects the right time slice.
+  // Rebook + ECNS show all currently-open deals in those pipelines — no date filter
+  // (open = it'll close eventually, and we want the full pipeline visible).
+  function renderForecastLayer(data, heatLayer, markerLayer, popupBuilder, opts) {
+    const filtered = data.filter(d => {
+      if (fRegion && !woInRegion(d, fRegion)) return false;
+      if (fService && !woNeedsService({ name: d.name, summary: d.summary }, fService)) return false;
+      if (opts && opts.dateField && opts.dateMin) {
+        const dd = parseWoDate(d[opts.dateField]);
+        if (dd && dd < opts.dateMin) return false;
+      }
+      return true;
+    });
+    const byCity = {};
+    filtered.forEach(d => {
+      if (isNaN(d.lat) || isNaN(d.lng)) return;
+      const k = (d.city + '|' + d.state).toLowerCase();
+      if (!byCity[k]) byCity[k] = { city: d.city, state: d.state, lat: d.lat, lng: d.lng, deals: [] };
+      byCity[k].deals.push(d);
+    });
+    const cityList = Object.values(byCity).sort((a, b) => b.deals.length - a.deals.length);
+    heatLayer.setLatLngs(cityList.map(c => [c.lat, c.lng, c.deals.length]));
+    markerLayer.clearLayers();
+    cityList.forEach(c => {
+      const m = L.circleMarker([c.lat, c.lng], {
+        radius: 4 + Math.sqrt(c.deals.length) * 2,
+        color: opts.outline, weight: 1, fillColor: opts.fill, fillOpacity: 0.0
+      });
+      m.bindPopup(popupBuilder(c, opts.label), { maxWidth: 360 });
+      m.addTo(markerLayer);
+    });
+    return { count: filtered.length, cities: cityList };
+  }
+
+  // Closed Won lookback: 3yr default — slice by closedate.
+  const cwonLookbackYears = 3;
+  const cwonCutoff = new Date(today.getTime() - cwonLookbackYears * 365 * 86400000);
+  renderForecastLayer(cwonData, cwonHeatLayer, cwonMarkerLayer, buildForecastPopup, {
+    dateField: 'closedate', dateMin: cwonCutoff, label: 'Closed Won', outline: '#92400e', fill: '#d97706'
+  });
+  renderForecastLayer(rebookData, rebookHeatLayer, rebookMarkerLayer, buildForecastPopup, {
+    label: 'Rebook (open)', outline: '#3b0764', fill: '#8b5cf6'
+  });
+  renderForecastLayer(ecnsData, ecnsHeatLayer, ecnsMarkerLayer, buildForecastPopup, {
+    label: 'ECNS (open)', outline: '#134e4a', fill: '#14b8a6'
+  });
+
   // ===== Warnings =====
   // Surfaces any data-quality / assignment issues for the current filter scope so Alex
   // can spot WOs that need attention. Each category is rendered only if it has hits.
@@ -1151,6 +1407,57 @@ function formatLostDate(s) {
   const m = String(d.getUTCMonth() + 1).padStart(2, '0');
   const day = String(d.getUTCDate()).padStart(2, '0');
   return y + '-' + m + '-' + day;
+}
+
+function buildNewPopup(c) {
+  // Same pattern as buildLostPopup but green and showing stage instead of category/reason.
+  const totalAmount = c.deals.reduce((sum, d) => sum + (d.amount || 0), 0);
+  const totalLabel = totalAmount > 0
+    ? ' · <span class="new-amount">$' + totalAmount.toLocaleString('en-US', { maximumFractionDigits: 0 }) + '</span>'
+    : '';
+  const items = c.deals.slice(0, 8).map(d => {
+    const amt = d.amount > 0
+      ? '<span class="new-amount">$' + d.amount.toLocaleString('en-US', { maximumFractionDigits: 0 }) + '</span>'
+      : '<span class="sub">no amount</span>';
+    const nameLabel = d.dealUrl
+      ? `<a href="${escapeHtml(d.dealUrl)}" target="_blank" rel="noopener" style="color:#15803d;text-decoration:none;font-weight:600;">${escapeHtml(d.name || 'Untitled')} ↗</a>`
+      : `<b>${escapeHtml(d.name || 'Untitled')}</b>`;
+    const stageBit = d.stage
+      ? `<span class="new-pill">${escapeHtml(d.stage)}</span>`
+      : '';
+    const createBit = d.createdate ? `<span class="sub">created ${escapeHtml(formatLostDate(d.createdate))}</span>` : '';
+    const pipelineBit = d.pipeline ? ` · <span class="sub">${escapeHtml(d.pipeline)}</span>` : '';
+    return `<li style="margin-bottom:9px;">${nameLabel}<br>${stageBit}${amt} · ${createBit}${pipelineBit}</li>`;
+  }).join('');
+  const more = c.deals.length > 8 ? `<div class="sub">+ ${c.deals.length - 8} more</div>` : '';
+  return `<h4 style="color:#15803d;">New Business in ${escapeHtml(c.city)}, ${escapeHtml(c.state)} — ${c.deals.length} deal${c.deals.length > 1 ? 's' : ''}${totalLabel}</h4><ul style="padding-left:16px;margin-top:6px;">${items}</ul>${more}`;
+}
+
+// Shared popup builder for the 3 forecasting layers (Closed Won / Rebook / ECNS).
+// Generic by design — same data shape from writeFeedExtended_, just different layer label.
+function buildForecastPopup(c, label) {
+  const totalAmount = c.deals.reduce((sum, d) => sum + (d.amount || 0), 0);
+  const totalLabel = totalAmount > 0
+    ? ' · <b>$' + totalAmount.toLocaleString('en-US', { maximumFractionDigits: 0 }) + '</b>'
+    : '';
+  const items = c.deals.slice(0, 8).map(d => {
+    const amt = d.amount > 0
+      ? '<b>$' + d.amount.toLocaleString('en-US', { maximumFractionDigits: 0 }) + '</b>'
+      : '<span class="sub">no amount</span>';
+    const nameLabel = d.dealUrl
+      ? `<a href="${escapeHtml(d.dealUrl)}" target="_blank" rel="noopener" style="color:#111827;text-decoration:none;font-weight:600;">${escapeHtml(d.name || 'Untitled')} ↗</a>`
+      : `<b>${escapeHtml(d.name || 'Untitled')}</b>`;
+    const stageBit = d.stage ? `<span class="sub">${escapeHtml(d.stage)}</span> · ` : '';
+    const dateBit = d.closedate
+      ? `closed ${escapeHtml(formatLostDate(d.closedate))}`
+      : (d.createdate ? `created ${escapeHtml(formatLostDate(d.createdate))}` : '');
+    const techDayBit = d.testingDays > 0
+      ? ` · <span class="sub">${d.testingDays}d × ${d.techs || 1} tech</span>`
+      : (d.techs > 0 ? ` · <span class="sub">${d.techs} tech</span>` : '');
+    return `<li style="margin-bottom:8px;">${nameLabel}<br>${stageBit}${amt}${techDayBit}<br><span class="sub">${dateBit}</span></li>`;
+  }).join('');
+  const more = c.deals.length > 8 ? `<div class="sub">+ ${c.deals.length - 8} more</div>` : '';
+  return `<h4>${escapeHtml(label)} in ${escapeHtml(c.city)}, ${escapeHtml(c.state)} — ${c.deals.length} deal${c.deals.length > 1 ? 's' : ''}${totalLabel}</h4><ul style="padding-left:16px;margin-top:6px;">${items}</ul>${more}`;
 }
 
 function buildRespPopup(r) {

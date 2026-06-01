@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MHD Forecast — Workload + Hiring Priority</title>
+
+<!-- Chart.js v4 + PapaParse -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
+
+<link rel="preconnect" href="https://rsms.me/">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+
+<style>
+:root {
+  --bg: #f6f5f1;
+  --panel: #ffffff;
+  --border: #e7e3d8;
+  --border-strong: #d4cfc1;
+  --text: #1f2937;
+  --muted: #6b7280;
+  --accent: #b91c1c;
+  --good: #16a34a;
+  --warn: #d97706;
+  --danger: #dc2626;
+  --responder: #2563eb;
+  --cwon: #d97706;
+  --rebook: #8b5cf6;
+  --ecns: #14b8a6;
+  --newbiz: #22c55e;
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-md: 0 1px 3px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: var(--text); background: var(--bg); -webkit-font-smoothing: antialiased; }
+header { padding: 16px 24px; background: linear-gradient(180deg, #ffffff 0%, #fbfaf6 100%); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; box-shadow: var(--shadow-sm); }
+header h1 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
+header .meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+header .nav a { font-size: 12px; color: var(--muted); text-decoration: none; padding: 6px 12px; border-radius: 5px; border: 1px solid var(--border-strong); background: #fff; }
+header .nav a:hover { background: #faf9f5; color: var(--text); }
+.controls { display: flex; gap: 16px; padding: 12px 24px; background: var(--panel); border-bottom: 1px solid var(--border); flex-wrap: wrap; align-items: center; font-size: 13px; }
+.controls label { display: flex; align-items: center; gap: 6px; color: #374151; }
+.controls select { font-size: 13px; padding: 5px 10px; border: 1px solid var(--border-strong); border-radius: 5px; background: #fff; }
+.controls button { font-size: 12px; padding: 5px 12px; border: 1px solid var(--border-strong); background: #fff; border-radius: 5px; cursor: pointer; }
+.controls button:hover { background: #faf9f5; }
+main { padding: 20px 24px 60px; max-width: 1480px; margin: 0 auto; }
+.cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px; }
+.card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; box-shadow: var(--shadow-md); }
+.card .label { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.card .value { font-size: 28px; font-weight: 700; color: #111827; margin-top: 6px; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.card .sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.card.accent { border-left: 4px solid var(--cwon); }
+.card.accent2 { border-left: 4px solid var(--responder); }
+.card.accent3 { border-left: 4px solid var(--good); }
+.card.accent4 { border-left: 4px solid var(--rebook); }
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+.row.single { grid-template-columns: 1fr; }
+.panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; box-shadow: var(--shadow-md); }
+.panel h2 { margin: 0 0 4px; font-size: 14px; font-weight: 600; color: #111827; }
+.panel .h-sub { font-size: 11px; color: var(--muted); margin-bottom: 12px; }
+.chart-wrap { position: relative; height: 320px; }
+.chart-wrap.tall { height: 420px; }
+.priority-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.priority-table th { text-align: left; padding: 8px 10px; background: #faf9f5; border-bottom: 2px solid var(--border-strong); font-weight: 600; color: #374151; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+.priority-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+.priority-table tr:last-child td { border-bottom: none; }
+.priority-table .gap-pos { color: var(--danger); font-weight: 700; }
+.priority-table .gap-neg { color: var(--good); }
+.priority-table .gap-zero { color: var(--muted); }
+.priority-table .hire { font-weight: 700; }
+.funnel { display: flex; flex-direction: column; gap: 6px; }
+.funnel-row { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.funnel-bar { flex: 1; background: #f3f1eb; border-radius: 4px; height: 22px; position: relative; overflow: hidden; }
+.funnel-bar .fill { height: 100%; border-radius: 4px; transition: width 0.4s; }
+.funnel-bar .fill.newbiz { background: linear-gradient(90deg, #86efac, #22c55e); }
+.funnel-bar .fill.rebook { background: linear-gradient(90deg, #c4b5fd, #8b5cf6); }
+.funnel-bar .fill.ecns { background: linear-gradient(90deg, #5eead4, #14b8a6); }
+.funnel-row .label { width: 200px; color: #374151; font-size: 12px; }
+.funnel-row .stat { width: 100px; text-align: right; font-variant-numeric: tabular-nums; color: #111827; font-weight: 600; }
+.legend-pill { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; margin-right: 6px; }
+.legend-pill.cwon { background: #fef3c7; color: #92400e; }
+.legend-pill.rebook { background: #ede9fe; color: #5b21b6; }
+.legend-pill.ecns { background: #ccfbf1; color: #134e4a; }
+.legend-pill.newbiz { background: #dcfce7; color: #14532d; }
+.assumptions { background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 12px 14px; font-size: 12px; color: #78350f; margin-bottom: 20px; line-height: 1.5; }
+.assumptions b { color: #451a03; }
+.assumptions code { background: #fef3c7; padding: 1px 5px; border-radius: 3px; font-size: 11px; }
+.status { font-size: 11px; color: var(--muted); padding: 8px 24px; background: var(--panel); border-top: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+@media (max-width: 1000px) {
+  .cards { grid-template-columns: repeat(2, 1fr); }
+  .row { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>MHD Forecast — Workload + Hiring Priority</h1>
+    <div class="meta" id="meta">Loading…</div>
+  </div>
+  <div class="nav">
+    <a href="../heatmap/">← Heat Map</a>
+  </div>
+</header>
+
+<div class="controls">
+  <label>Region <select id="filter-region"><option value="">All</option><option value="NE">NE</option><option value="SE">SE</option><option value="W">W</option><option value="C">C</option></select></label>
+  <label>Service <select id="filter-service"><option value="">All</option><option>Audio</option><option>ResFit</option><option>MEQ</option><option>Air</option><option>NLS</option><option>ENLS</option><option>Dosimetry</option></select></label>
+  <label>Forecast horizon <select id="filter-horizon"><option value="4">Next 4 quarters</option><option value="2">Next 2 quarters</option><option value="6">Next 6 quarters</option></select></label>
+  <button id="reload-btn">Reload data</button>
+</div>
+
+<main>
+
+  <div class="assumptions">
+    <b>How the forecast works.</b>
+    Demand = (open Rebook + ECNS + New Business deals) × stage probability × workload (<code>testing_days_quantity × of_techs</code>), bucketed into the quarter of the deal's expected start date. Stage probabilities are HubSpot-style: <code>Qualification 10%</code>, <code>Proposal Sent 30%</code>, <code>Scheduling 70%</code>, <code>Scheduled 95%</code>. Capacity = schedulable responders per region × 60 working days/quarter. Gap = demand − capacity; positive means the region needs more responders. Hiring suggestion assumes each new responder adds 60 tech-days of quarterly capacity.
+  </div>
+
+  <div class="cards">
+    <div class="card accent">
+      <div class="label">Open Pipeline $</div>
+      <div class="value" id="kpi-pipeline">—</div>
+      <div class="sub">All open deals (Rebook + ECNS + New Biz)</div>
+    </div>
+    <div class="card accent3">
+      <div class="label">Expected Close $ (12 mo)</div>
+      <div class="value" id="kpi-expected">—</div>
+      <div class="sub">Pipeline × stage probability</div>
+    </div>
+    <div class="card accent4">
+      <div class="label">Closed Won (3 yr)</div>
+      <div class="value" id="kpi-closed-won">—</div>
+      <div class="sub" id="kpi-closed-won-sub">— deals total</div>
+    </div>
+    <div class="card accent2">
+      <div class="label">Schedulable Responders</div>
+      <div class="value" id="kpi-responders">—</div>
+      <div class="sub">Excludes managers/SDM and on-leave</div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="panel">
+      <h2>Quarterly Workload Forecast</h2>
+      <div class="h-sub">Tech-days of demand vs. capacity, by region. Bars stacked by pipeline source.</div>
+      <div class="chart-wrap tall"><canvas id="chart-workload"></canvas></div>
+    </div>
+    <div class="panel">
+      <h2>Seasonality — Closed Won by Month</h2>
+      <div class="h-sub">Last 3 years of Closed Won deals, averaged by calendar month. Surfaces peaks and lulls.</div>
+      <div class="chart-wrap tall"><canvas id="chart-seasonality"></canvas></div>
+    </div>
+  </div>
+
+  <div class="row single">
+    <div class="panel">
+      <h2>Hiring Priority — Next 12 Months by Region</h2>
+      <div class="h-sub">Demand and capacity rolled forward 12 months. Positive gap = understaffed; suggested hires = ceil(gap / 240 tech-days per responder per year).</div>
+      <table class="priority-table" id="hiring-table">
+        <thead>
+          <tr>
+            <th>Region</th>
+            <th style="text-align:right">Current Responders</th>
+            <th style="text-align:right">Projected Demand (tech-days)</th>
+            <th style="text-align:right">Capacity (tech-days)</th>
+            <th style="text-align:right">Gap</th>
+            <th style="text-align:right">Suggested Hires</th>
+          </tr>
+        </thead>
+        <tbody id="hiring-body"><tr><td colspan="6" style="color:var(--muted);font-style:italic;text-align:center;padding:20px;">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="panel">
+      <h2>Open Pipeline by Stage</h2>
+      <div class="h-sub">Where deals sit right now across Rebook, ECNS, and New Business pipelines. Width = count of deals.</div>
+      <div class="funnel" id="funnel"></div>
+    </div>
+    <div class="panel">
+      <h2>Closed Won — Last 36 Months</h2>
+      <div class="h-sub">Monthly trend across all regions. Captures growth direction and seasonal volatility.</div>
+      <div class="chart-wrap"><canvas id="chart-trend"></canvas></div>
+    </div>
+  </div>
+
+</main>
+
+<div class="status" id="status">Initializing…</div>
+
+<script>
+// ============================================================
+// CONFIG — must match the Apps Script tab names
+// ============================================================
+const SHEET_ID = '14VbFR3dKRCb2LoalZQxTYMSN8g_IXhmCDQci3112D50';
+const CLOSED_WON_TAB = 'CLOSED_WON_FEED';
+const NEW_BIZ_TAB    = 'NEW_BIZ_FEED';
+const REBOOK_TAB     = 'REBOOK_FEED';
+const ECNS_TAB       = 'ECNS_FEED';
+const RESPONDER_TAB  = 'MASTER';
+const META_TAB       = 'WO_HEAT_META';
+
+// Stage probabilities — HubSpot-style defaults. Adjust here to recalibrate the forecast.
+// Keys match the stage *label* (case-insensitive) since stage IDs vary across pipelines.
+const STAGE_PROBABILITY = {
+  'qualification':                    0.10,
+  'proposal sent':                    0.30,
+  'scheduling and contract negotiation': 0.70,
+  'scheduled':                        0.95,
+  'on hold - reschedule/cancellation': 0.20,
+  'closed won':                       1.00,
+  'closed lost':                      0.00
+};
+
+// Working days per quarter — used for capacity math (1 responder × 60 days = 60 tech-days/qtr).
+const WORKING_DAYS_PER_QUARTER = 60;
+// Annualized: ~240 tech-days/yr per responder.
+const ANNUAL_CAPACITY_PER_RESPONDER = 240;
+
+const REGION_DEFAULTS = {
+  CT:'NE', ME:'NE', MA:'NE', NH:'NE', NJ:'NE', NY:'NE', PA:'NE', RI:'NE', VT:'NE',
+  AL:'SE', AR:'SE', DC:'SE', DE:'SE', FL:'SE', GA:'SE', KY:'SE', LA:'SE', MD:'SE',
+  MS:'SE', NC:'SE', SC:'SE', TN:'SE', VA:'SE', WV:'SE',
+  IL:'C',  IN:'C',  IA:'C',  KS:'C',  MI:'C',  MN:'C',  MO:'C',  NE:'C',  ND:'C',
+  OH:'C',  OK:'C',  SD:'C',  TX:'C',  WI:'C',
+  AK:'W',  AZ:'W',  CA:'W',  CO:'W',  HI:'W',  ID:'W',  MT:'W',  NV:'W',  NM:'W',
+  OR:'W',  UT:'W',  WA:'W',  WY:'W'
+};
+
+const REGIONS = ['NE', 'SE', 'C', 'W'];
+const REGION_COLOR = { 'NE': '#2563eb', 'SE': '#16a34a', 'C': '#d97706', 'W': '#8b5cf6' };
+
+// ============================================================
+// State
+// ============================================================
+let cwonData = [], rebookData = [], ecnsData = [], newBizData = [], respData = [];
+let stateToRegion = Object.assign({}, REGION_DEFAULTS);
+let charts = {}; // Chart.js instances keyed by canvas id
+
+// ============================================================
+// Helpers
+// ============================================================
+function gvizCsv(sheetName, range) {
+  let url = 'https://docs.google.com/spreadsheets/d/' + SHEET_ID + '/gviz/tq?tqx=out:csv&sheet=' + encodeURIComponent(sheetName);
+  if (range) url += '&range=' + encodeURIComponent(range);
+  return url;
+}
+function fetchCsv(url) {
+  return new Promise((resolve) => {
+    Papa.parse(url, {
+      download: true, header: true, skipEmptyLines: true,
+      complete: (res) => resolve(res.data),
+      error: () => resolve([])
+    });
+  });
+}
+function parseDate(s) {
+  if (!s) return null;
+  const str = String(s).trim();
+  if (/^\d+$/.test(str)) return new Date(parseInt(str, 10));
+  const d = new Date(str);
+  return isNaN(d.getTime()) ? null : d;
+}
+function setStatus(msg) { document.getElementById('status').textContent = msg; }
+function fmt$(n) { return n > 0 ? '$' + Math.round(n).toLocaleString('en-US') : '$0'; }
+function fmtShort$(n) {
+  if (n >= 1e6) return '$' + (n / 1e6).toFixed(1) + 'M';
+  if (n >= 1e3) return '$' + (n / 1e3).toFixed(0) + 'K';
+  return '$' + Math.round(n);
+}
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+function stateRegion(state) {
+  return stateToRegion[(state || '').toUpperCase().trim()] || null;
+}
+
+// Build state→region map from responders' actual home states (overrides Census defaults).
+function buildStateRegionMap() {
+  stateToRegion = Object.assign({}, REGION_DEFAULTS);
+  const tally = {};
+  respData.forEach(r => {
+    const st = (r.state || '').toUpperCase().trim();
+    const rgRaw = (r.region || '').toUpperCase().trim();
+    if (!st || !rgRaw) return;
+    const m = rgRaw.match(/^(NE|SE|W|C)\b/);
+    if (!m) return;
+    const rg = m[1];
+    tally[st] = tally[st] || {};
+    tally[st][rg] = (tally[st][rg] || 0) + 1;
+  });
+  Object.keys(tally).forEach(st => {
+    const best = Object.entries(tally[st]).sort((a, b) => b[1] - a[1])[0];
+    if (best) stateToRegion[st] = best[0];
+  });
+}
+
+// Forecast unit = "tech-days" = testing_days_quantity × #_of_techs.
+// Defaults if either field is missing: 1 day × 1 tech = 1 tech-day.
+function dealWorkload(d) {
+  const td = (d.testingDays > 0 ? d.testingDays : 1);
+  const tc = (d.techs > 0 ? d.techs : 1);
+  return td * tc;
+}
+
+// Stage probability — lookup by lowercase label. Default 50% if unknown.
+function stageProbability(stage) {
+  const key = (stage || '').toString().toLowerCase().trim();
+  if (STAGE_PROBABILITY[key] != null) return STAGE_PROBABILITY[key];
+  // Fuzzy: partial match for HubSpot's slightly-different labels.
+  for (const k in STAGE_PROBABILITY) {
+    if (key.indexOf(k) !== -1 || k.indexOf(key) !== -1) return STAGE_PROBABILITY[k];
+  }
+  return 0.5;
+}
+
+// Returns the {year, quarter} that contains `date`.
+function dateToQuarter(date) {
+  return { year: date.getFullYear(), quarter: Math.floor(date.getMonth() / 3) + 1 };
+}
+function quarterLabel(qInfo) { return 'Q' + qInfo.quarter + ' ' + String(qInfo.year).slice(-2); }
+function quarterFromOffset(offset) {
+  // offset 0 = current quarter, 1 = next, etc.
+  const now = new Date();
+  const q0 = Math.floor(now.getMonth() / 3);
+  const totalQ = q0 + offset;
+  return { year: now.getFullYear() + Math.floor(totalQ / 4), quarter: (totalQ % 4 + 4) % 4 + 1 };
+}
+
+// Service matching — same logic as the heat map, lightweight version.
+const SERVICE_FILTER_MAP = {
+  'Audio':     ['audio', 'audiometric'],
+  'ResFit':    ['fit test', 'respirator fit', ' qn ', ' ql ', 'quantitative', 'qualitative'],
+  'MEQ':       ['meq', 'medical evaluation'],
+  'Air':       ['air monitor'],
+  'NLS':       ['noise level'],
+  'ENLS':      ['environmental noise', 'enls'],
+  'Dosimetry': ['dosimet']
+};
+function dealMatchesService(d, svc) {
+  if (!svc) return true;
+  const text = ((d.name || '') + ' ' + (d.summary || '')).toLowerCase();
+  return (SERVICE_FILTER_MAP[svc] || []).some(needle => text.indexOf(needle) !== -1);
+}
+
+// ============================================================
+// Data load
+// ============================================================
+async function loadAll() {
+  setStatus('Loading 4 feeds + responder roster…');
+  const [cwonRows, rebookRows, ecnsRows, newRows, respRows, metaRows] = await Promise.all([
+    fetchCsv(gvizCsv(CLOSED_WON_TAB)),
+    fetchCsv(gvizCsv(REBOOK_TAB)),
+    fetchCsv(gvizCsv(ECNS_TAB)),
+    fetchCsv(gvizCsv(NEW_BIZ_TAB)),
+    fetchCsv(gvizCsv(RESPONDER_TAB, 'A2:U')),
+    fetchCsv(gvizCsv(META_TAB))
+  ]);
+
+  function parseDeal(r) {
+    return {
+      wo: r['WO'] || '',
+      name: r['Deal Name'] || '',
+      pipeline: r['Pipeline'] || '',
+      stage: r['Stage'] || '',
+      createdate: r['Created Date'] || '',
+      start: r['Start Date'] || '',
+      closedate: r['Close Date'] || '',
+      amount: parseFloat(r['Amount']) || 0,
+      techs: parseFloat(r['# Techs']) || 0,
+      testingDays: parseFloat(r['Testing Days']) || 0,
+      employees: parseFloat(r['# Employees']) || 0,
+      city: r['City'] || '',
+      state: r['State'] || '',
+      summary: r['Schedule Summary'] || '',
+      dealUrl: r['Deal URL'] || ''
+    };
+  }
+  cwonData   = cwonRows.map(parseDeal);
+  rebookData = rebookRows.map(parseDeal);
+  ecnsData   = ecnsRows.map(parseDeal);
+  newBizData = newRows.map(parseDeal);
+
+  respData = respRows.map(r => ({
+    name: r['Name'] || '',
+    region: r['Region'] || '',
+    state: r['Home State'] || '',
+    title: r['Title'] || '',
+    notes: r['Notes / Idiosyncrasies'] || '',
+    rating: parseInt(r['Svc Rating'] || '0', 10) || 0
+  })).filter(r => r.name);
+  buildStateRegionMap();
+
+  const meta = {};
+  metaRows.forEach(r => { meta[r['Key'] || r[0]] = r['Value'] || r[1]; });
+  document.getElementById('meta').textContent =
+    cwonData.length + ' Closed Won · ' + rebookData.length + ' Rebook · ' +
+    ecnsData.length + ' ECNS · ' + newBizData.length + ' New Biz · ' +
+    respData.length + ' responders' +
+    (meta['updated_at'] ? ' · last WO sync ' + meta['updated_at'] : '');
+
+  setStatus('Ready.');
+  redraw();
+}
+
+// ============================================================
+// Forecast model + render
+// ============================================================
+function isSchedulable(r) {
+  const lead = /Lead|Manager|SDM/i.test(r.region || '') || /Manager|Director|SDM/i.test(r.title || '');
+  const onLeave = /leave/i.test(r.notes || '');
+  return !lead && !onLeave;
+}
+
+function applyFilters(deals, region, service) {
+  return deals.filter(d => {
+    if (region && stateRegion(d.state) !== region) return false;
+    if (service && !dealMatchesService(d, service)) return false;
+    return true;
+  });
+}
+
+function redraw() {
+  const fRegion = document.getElementById('filter-region').value;
+  const fService = document.getElementById('filter-service').value;
+  const horizon = parseInt(document.getElementById('filter-horizon').value, 10) || 4;
+
+  // Filter datasets
+  const cwon = applyFilters(cwonData, fRegion, fService);
+  const rebook = applyFilters(rebookData, fRegion, fService);
+  const ecns = applyFilters(ecnsData, fRegion, fService);
+  const newBiz = applyFilters(newBizData, fRegion, fService);
+  const openDeals = rebook.concat(ecns).concat(newBiz);
+
+  // ===== KPI cards =====
+  const pipelineTotal = openDeals.reduce((s, d) => s + d.amount, 0);
+  const expectedTotal = openDeals.reduce((s, d) => s + d.amount * stageProbability(d.stage), 0);
+  const cwonTotal = cwon.reduce((s, d) => s + d.amount, 0);
+  const schedResp = respData.filter(isSchedulable).filter(r => !fRegion || (r.region || '').toUpperCase().startsWith(fRegion));
+  document.getElementById('kpi-pipeline').textContent = fmtShort$(pipelineTotal);
+  document.getElementById('kpi-expected').textContent = fmtShort$(expectedTotal);
+  document.getElementById('kpi-closed-won').textContent = fmtShort$(cwonTotal);
+  document.getElementById('kpi-closed-won-sub').textContent = cwon.length.toLocaleString('en-US') + ' deals total';
+  document.getElementById('kpi-responders').textContent = schedResp.length;
+
+  // ===== Quarterly workload forecast =====
+  // For each open deal, contribute (workload × probability) to its expected-close quarter.
+  // Quarter is derived from start date if set; otherwise from createdate + median pipeline lag (60 days fallback).
+  const quarters = [];
+  for (let i = 0; i < horizon; i++) quarters.push(quarterFromOffset(i));
+  const quarterKeys = quarters.map(q => q.year + '-Q' + q.quarter);
+
+  // Per-region per-quarter demand, split by source pipeline.
+  const demand = {}; // region → quarterKey → { rebook: x, ecns: y, newbiz: z }
+  REGIONS.forEach(r => { demand[r] = {}; quarterKeys.forEach(k => demand[r][k] = { rebook: 0, ecns: 0, newbiz: 0 }); });
+
+  function attribute(d, sourceKey) {
+    const region = stateRegion(d.state);
+    if (!region) return;
+    let when = parseDate(d.start) || parseDate(d.createdate);
+    if (!when) return;
+    // If `when` is in the past (e.g. createdate from months ago), bump to "this quarter"
+    // since the deal hasn't closed yet but is still expected to.
+    if (when < new Date()) when = new Date();
+    const qInfo = dateToQuarter(when);
+    const qKey = qInfo.year + '-Q' + qInfo.quarter;
+    if (!demand[region][qKey]) return; // outside the horizon
+    const workload = dealWorkload(d) * stageProbability(d.stage);
+    demand[region][qKey][sourceKey] += workload;
+  }
+  rebook.forEach(d => attribute(d, 'rebook'));
+  ecns.forEach(d => attribute(d, 'ecns'));
+  newBiz.forEach(d => attribute(d, 'newbiz'));
+
+  // Capacity per region per quarter = schedulable responder count × WORKING_DAYS_PER_QUARTER
+  const capacity = {};
+  REGIONS.forEach(r => {
+    const count = respData.filter(isSchedulable).filter(p => (p.region || '').toUpperCase().startsWith(r)).length;
+    capacity[r] = count * WORKING_DAYS_PER_QUARTER;
+  });
+
+  drawWorkloadChart(quarters, demand, capacity, fRegion);
+
+  // ===== Seasonality chart (avg Closed Won deals per calendar month, last 3 yrs) =====
+  drawSeasonalityChart(cwon);
+
+  // ===== Hiring priority table =====
+  drawHiringTable(demand, capacity, fRegion);
+
+  // ===== Pipeline funnel =====
+  drawFunnel(rebook, ecns, newBiz);
+
+  // ===== Closed Won 36-month trend =====
+  drawTrendChart(cwon);
+}
+
+function drawWorkloadChart(quarters, demand, capacity, regionFilter) {
+  const ctx = document.getElementById('chart-workload').getContext('2d');
+  if (charts.workload) charts.workload.destroy();
+
+  const regionsShown = regionFilter ? [regionFilter] : REGIONS;
+  const qKeys = quarters.map(q => q.year + '-Q' + q.quarter);
+  const labels = [];
+  regionsShown.forEach(r => qKeys.forEach(q => labels.push(r + '  ' + 'Q' + q.split('-Q')[1] + " '" + q.split('-Q')[0].slice(-2))));
+
+  function vals(source) {
+    const out = [];
+    regionsShown.forEach(r => qKeys.forEach(q => out.push(Math.round(demand[r][q][source]))));
+    return out;
+  }
+  function capVals() {
+    const out = [];
+    regionsShown.forEach(r => qKeys.forEach(() => out.push(capacity[r])));
+    return out;
+  }
+
+  charts.workload = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [
+        { label: 'Rebook',        data: vals('rebook'),  backgroundColor: '#8b5cf6', stack: 'demand' },
+        { label: 'ECNS',          data: vals('ecns'),    backgroundColor: '#14b8a6', stack: 'demand' },
+        { label: 'New Business',  data: vals('newbiz'),  backgroundColor: '#22c55e', stack: 'demand' },
+        { label: 'Capacity',      data: capVals(),       type: 'line', borderColor: '#dc2626', borderWidth: 2, pointRadius: 3, backgroundColor: 'rgba(220,38,38,0.0)', fill: false, tension: 0 }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: {
+        x: { stacked: true, ticks: { font: { size: 10 } } },
+        y: { stacked: true, title: { display: true, text: 'Tech-days' } }
+      },
+      plugins: {
+        legend: { position: 'bottom' },
+        tooltip: { callbacks: { label: (ctx) => ctx.dataset.label + ': ' + Math.round(ctx.parsed.y) + ' tech-days' } }
+      }
+    }
+  });
+}
+
+function drawSeasonalityChart(cwon) {
+  const ctx = document.getElementById('chart-seasonality').getContext('2d');
+  if (charts.seasonality) charts.seasonality.destroy();
+  const counts = new Array(12).fill(0);
+  const yearsSeen = new Set();
+  cwon.forEach(d => {
+    const dt = parseDate(d.closedate);
+    if (!dt) return;
+    counts[dt.getMonth()]++;
+    yearsSeen.add(dt.getFullYear());
+  });
+  const yrs = Math.max(yearsSeen.size, 1);
+  const avg = counts.map(c => c / yrs);
+  charts.seasonality = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],
+      datasets: [{ label: 'Avg Closed Won per month', data: avg, backgroundColor: '#d97706' }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: { y: { title: { display: true, text: 'Avg deals/month' } } },
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => Math.round(c.parsed.y * 10) / 10 + ' avg deals' } } }
+    }
+  });
+}
+
+function drawTrendChart(cwon) {
+  const ctx = document.getElementById('chart-trend').getContext('2d');
+  if (charts.trend) charts.trend.destroy();
+  const byMonth = {};
+  cwon.forEach(d => {
+    const dt = parseDate(d.closedate);
+    if (!dt) return;
+    const k = dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0');
+    byMonth[k] = (byMonth[k] || 0) + 1;
+  });
+  const keys = Object.keys(byMonth).sort();
+  const labels = keys.map(k => {
+    const [y, m] = k.split('-');
+    return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(m, 10) - 1] + " '" + y.slice(-2);
+  });
+  const data = keys.map(k => byMonth[k]);
+  charts.trend = new Chart(ctx, {
+    type: 'line',
+    data: { labels: labels, datasets: [{ label: 'Closed Won deals', data: data, borderColor: '#d97706', backgroundColor: 'rgba(217,119,6,0.15)', fill: true, tension: 0.25, pointRadius: 2 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: { x: { ticks: { maxTicksLimit: 12, font: { size: 10 } } } },
+      plugins: { legend: { display: false } }
+    }
+  });
+}
+
+function drawHiringTable(demand, capacity, regionFilter) {
+  const tbody = document.getElementById('hiring-body');
+  const regionsShown = regionFilter ? [regionFilter] : REGIONS;
+  // 12-month demand = sum of all quarterly demand for that region (within horizon)
+  const rows = regionsShown.map(r => {
+    let demandTotal = 0;
+    Object.keys(demand[r]).forEach(qk => {
+      demandTotal += demand[r][qk].rebook + demand[r][qk].ecns + demand[r][qk].newbiz;
+    });
+    // Annualize the capacity proportionally to horizon (if horizon = 4qtrs, capacity is 4× quarterly)
+    const horizonQs = Object.keys(demand[r]).length;
+    const capTotal = capacity[r] * horizonQs;
+    const gap = demandTotal - capTotal;
+    const currentResp = respData.filter(isSchedulable).filter(p => (p.region || '').toUpperCase().startsWith(r)).length;
+    // Scale suggested hires to the horizon window
+    const annualizedGap = gap * (4 / horizonQs);
+    const suggestHires = annualizedGap > 0 ? Math.ceil(annualizedGap / ANNUAL_CAPACITY_PER_RESPONDER) : 0;
+    return { region: r, currentResp, demandTotal, capTotal, gap, suggestHires };
+  }).sort((a, b) => b.gap - a.gap);
+
+  tbody.innerHTML = rows.map(r => {
+    const gapClass = r.gap > 5 ? 'gap-pos' : (r.gap < -5 ? 'gap-neg' : 'gap-zero');
+    const hiresLabel = r.suggestHires > 0 ? '+' + r.suggestHires : '—';
+    return `
+      <tr>
+        <td><b>${r.region}</b></td>
+        <td style="text-align:right">${r.currentResp}</td>
+        <td style="text-align:right">${Math.round(r.demandTotal).toLocaleString('en-US')}</td>
+        <td style="text-align:right">${Math.round(r.capTotal).toLocaleString('en-US')}</td>
+        <td style="text-align:right" class="${gapClass}">${r.gap > 0 ? '+' : ''}${Math.round(r.gap).toLocaleString('en-US')}</td>
+        <td style="text-align:right" class="hire ${gapClass}">${hiresLabel}</td>
+      </tr>`;
+  }).join('');
+}
+
+function drawFunnel(rebook, ecns, newBiz) {
+  const groups = [
+    { label: 'Rebook', data: rebook, cls: 'rebook' },
+    { label: 'ECNS', data: ecns, cls: 'ecns' },
+    { label: 'New Business', data: newBiz, cls: 'newbiz' }
+  ];
+  let html = '';
+  const maxCount = Math.max(1, ...groups.flatMap(g => {
+    const tally = {};
+    g.data.forEach(d => { const s = d.stage || '(none)'; tally[s] = (tally[s] || 0) + 1; });
+    return Object.values(tally);
+  }));
+  groups.forEach(g => {
+    const tally = {};
+    g.data.forEach(d => {
+      const s = d.stage || '(no stage)';
+      if (!tally[s]) tally[s] = { count: 0, amount: 0 };
+      tally[s].count++;
+      tally[s].amount += d.amount;
+    });
+    const sorted = Object.entries(tally).sort((a, b) => b[1].count - a[1].count);
+    if (sorted.length === 0) {
+      html += `<div class="funnel-row"><div class="label"><span class="legend-pill ${g.cls}">${g.label}</span></div><div class="funnel-bar"></div><div class="stat" style="color:var(--muted)">no open deals</div></div>`;
+      return;
+    }
+    html += `<div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-top:10px;margin-bottom:4px;">${escapeHtml(g.label)} — ${g.data.length} deal${g.data.length === 1 ? '' : 's'}</div>`;
+    sorted.forEach(([stage, info]) => {
+      const pct = (info.count / maxCount) * 100;
+      html += `<div class="funnel-row">
+        <div class="label">${escapeHtml(stage)}</div>
+        <div class="funnel-bar"><div class="fill ${g.cls}" style="width:${pct}%"></div></div>
+        <div class="stat">${info.count} · ${fmtShort$(info.amount)}</div>
+      </div>`;
+    });
+  });
+  document.getElementById('funnel').innerHTML = html;
+}
+
+// ============================================================
+// Init
+// ============================================================
+function bindControls() {
+  ['filter-region', 'filter-service', 'filter-horizon'].forEach(id => {
+    document.getElementById(id).addEventListener('change', redraw);
+  });
+  document.getElementById('reload-btn').addEventListener('click', () => {
+    setStatus('Reloading…');
+    loadAll();
+  });
+}
+
+bindControls();
+loadAll();
+</script>
+</body>
+</html>

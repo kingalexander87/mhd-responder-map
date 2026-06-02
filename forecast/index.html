@@ -1,633 +1,812 @@
-/**
- * MHD Work Order Heat Map — HubSpot → Master Sheet sync
- *
- * Pulls all upcoming Deals with a WO# and start date in the next 120 days
- * from HubSpot, parses city/state from service_address, geocodes via Google's
- * built-in geocoder (with a persistent cache), and writes everything to the
- * `WO_HEAT_FEED` tab in this Master Sheet. The GitHub Pages /heatmap/ route
- * reads that tab via the Sheets gviz endpoint.
- *
- * Setup (one time):
- *   1. In this script editor: File → Project Properties → Script Properties
- *      (or "Project Settings" → "Script Properties" in the new UI).
- *      Add a property:
- *        HUBSPOT_PRIVATE_APP_TOKEN = pat-na1-xxxxxxxx... (paste your token)
- *   2. Run `syncWOHeatFeed` once manually to authorize permissions
- *      (UrlFetchApp, SpreadsheetApp, External Maps service).
- *   3. Run `installHourlyTrigger` once to schedule the sync.
- *
- * To re-run on demand, just run `syncWOHeatFeed`.
- */
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MHD Forecast — Workload + Hiring Priority</title>
 
-// ===== Configuration =====
-const HUBSPOT_TOKEN_KEY = 'HUBSPOT_PRIVATE_APP_TOKEN';
-const HUBSPOT_PORTAL_ID = '241994300';       // MHD HubSpot account — used to build deal-record URLs
-const FEED_SHEET_NAME = 'WO_HEAT_FEED';
-const META_SHEET_NAME = 'WO_HEAT_META';     // small one-cell tab for "last updated"
-const WINDOW_DAYS = 365;  // pull a full year so the heat map's date-window dropdown (up to 365) has data
-const HUBSPOT_API = 'https://api.hubapi.com/crm/v3/objects/deals/search';
-const PAGE_SIZE = 100;                       // HubSpot v3 limit
+<!-- Chart.js v4 + PapaParse -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
 
-// Stages to exclude from the heat map: Closed Lost (deal lost) and
-// "On Hold - Reschedule/Cancellation" (treated as cancelled). Covers all three
-// numeric MHD pipelines plus the default HubSpot internal IDs and the legacy
-// Salesforce default pipeline. Adjust if MHD adds a new pipeline.
-const EXCLUDED_STAGE_IDS = [
-  // Closed Lost
-  '2926762718', '2926762725', '3406889665', 'closedlost', '705bd989-72d3-407c-902f-6386854d56cd',
-  // On Hold - Reschedule/Cancellation
-  '2926762719', '2926762726', '3406889664', '2189604571'
-];
+<link rel="preconnect" href="https://rsms.me/">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
 
-// ===== Pipeline + stage IDs for the forecasting layers =====
-const PIPELINE_NEW_BIZ = '1845999306';   // A/E Pipeline - New Business
-const PIPELINE_REBOOK  = '1845999307';   // A/M Pipeline - Renewal Business
-const PIPELINE_ECNS    = '2139604720';   // E.C.N.S. Pipeline - Existing Client New Service
+<style>
+:root {
+  --bg: #f6f5f1;
+  --panel: #ffffff;
+  --border: #e7e3d8;
+  --border-strong: #d4cfc1;
+  --text: #1f2937;
+  --muted: #6b7280;
+  --accent: #b91c1c;
+  --good: #16a34a;
+  --warn: #d97706;
+  --danger: #dc2626;
+  --responder: #2563eb;
+  --cwon: #d97706;
+  --rebook: #8b5cf6;
+  --ecns: #14b8a6;
+  --newbiz: #22c55e;
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-md: 0 1px 3px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: var(--text); background: var(--bg); -webkit-font-smoothing: antialiased; }
+header { padding: 16px 24px; background: linear-gradient(180deg, #ffffff 0%, #fbfaf6 100%); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; box-shadow: var(--shadow-sm); }
+header h1 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
+header .meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+header .nav a { font-size: 12px; color: var(--muted); text-decoration: none; padding: 6px 12px; border-radius: 5px; border: 1px solid var(--border-strong); background: #fff; }
+header .nav a:hover { background: #faf9f5; color: var(--text); }
+.controls { display: flex; gap: 16px; padding: 12px 24px; background: var(--panel); border-bottom: 1px solid var(--border); flex-wrap: wrap; align-items: center; font-size: 13px; }
+.controls label { display: flex; align-items: center; gap: 6px; color: #374151; }
+.controls select { font-size: 13px; padding: 5px 10px; border: 1px solid var(--border-strong); border-radius: 5px; background: #fff; }
+.controls button { font-size: 12px; padding: 5px 12px; border: 1px solid var(--border-strong); background: #fff; border-radius: 5px; cursor: pointer; }
+.controls button:hover { background: #faf9f5; }
+main { padding: 20px 24px 60px; max-width: 1480px; margin: 0 auto; }
+.cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px; }
+.card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; box-shadow: var(--shadow-md); }
+.card .label { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.card .value { font-size: 28px; font-weight: 700; color: #111827; margin-top: 6px; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.card .sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.card.accent { border-left: 4px solid var(--cwon); }
+.card.accent2 { border-left: 4px solid var(--responder); }
+.card.accent3 { border-left: 4px solid var(--good); }
+.card.accent4 { border-left: 4px solid var(--rebook); }
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+.row.single { grid-template-columns: 1fr; }
+.panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; box-shadow: var(--shadow-md); }
+.panel h2 { margin: 0 0 4px; font-size: 14px; font-weight: 600; color: #111827; }
+.panel .h-sub { font-size: 11px; color: var(--muted); margin-bottom: 12px; }
+.chart-wrap { position: relative; height: 320px; }
+.chart-wrap.tall { height: 420px; }
+.priority-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.priority-table th { text-align: left; padding: 8px 10px; background: #faf9f5; border-bottom: 2px solid var(--border-strong); font-weight: 600; color: #374151; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+.priority-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+.priority-table tr:last-child td { border-bottom: none; }
+.priority-table .gap-pos { color: var(--danger); font-weight: 700; }
+.priority-table .gap-neg { color: var(--good); }
+.priority-table .gap-zero { color: var(--muted); }
+.priority-table .hire { font-weight: 700; }
+.funnel { display: flex; flex-direction: column; gap: 6px; }
+.funnel-row { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.funnel-bar { flex: 1; background: #f3f1eb; border-radius: 4px; height: 22px; position: relative; overflow: hidden; }
+.funnel-bar .fill { height: 100%; border-radius: 4px; transition: width 0.4s; }
+.funnel-bar .fill.newbiz { background: linear-gradient(90deg, #86efac, #22c55e); }
+.funnel-bar .fill.rebook { background: linear-gradient(90deg, #c4b5fd, #8b5cf6); }
+.funnel-bar .fill.ecns { background: linear-gradient(90deg, #5eead4, #14b8a6); }
+.funnel-row .label { width: 200px; color: #374151; font-size: 12px; }
+.funnel-row .stat { width: 100px; text-align: right; font-variant-numeric: tabular-nums; color: #111827; font-weight: 600; }
+.legend-pill { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; margin-right: 6px; }
+.legend-pill.cwon { background: #fef3c7; color: #92400e; }
+.legend-pill.rebook { background: #ede9fe; color: #5b21b6; }
+.legend-pill.ecns { background: #ccfbf1; color: #134e4a; }
+.legend-pill.newbiz { background: #dcfce7; color: #14532d; }
+.assumptions { background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 12px 14px; font-size: 12px; color: #78350f; margin-bottom: 20px; line-height: 1.5; }
+.assumptions b { color: #451a03; }
+.assumptions code { background: #fef3c7; padding: 1px 5px; border-radius: 3px; font-size: 11px; }
+.status { font-size: 11px; color: var(--muted); padding: 8px 24px; background: var(--panel); border-top: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+@media (max-width: 1000px) {
+  .cards { grid-template-columns: repeat(2, 1fr); }
+  .row { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
 
-const CLOSED_WON_STAGE_IDS = [
-  '2926762717', '2926762724', '3406889663', 'closedwon',
-  'b48373da-86c3-461f-a715-73ea5fa5315c'
-];
+<header>
+  <div>
+    <h1>MHD Forecast — Workload + Hiring Priority</h1>
+    <div class="meta" id="meta">Loading…</div>
+  </div>
+  <div class="nav">
+    <a href="../heatmap/">← Heat Map</a>
+  </div>
+</header>
 
-const CLOSED_WON_FEED_SHEET = 'CLOSED_WON_FEED';
-const NEW_BIZ_FEED_SHEET    = 'NEW_BIZ_FEED';
-const REBOOK_FEED_SHEET     = 'REBOOK_FEED';
-const ECNS_FEED_SHEET       = 'ECNS_FEED';
-const CLOSED_WON_LOOKBACK_YEARS = 3;
+<div class="controls">
+  <label>Region <select id="filter-region"><option value="">All</option><option value="NE">NE</option><option value="SE">SE</option><option value="W">W</option><option value="C">C</option></select></label>
+  <label>Service <select id="filter-service"><option value="">All</option><option>Audio</option><option>ResFit</option><option>MEQ</option><option>Air</option><option>NLS</option><option>ENLS</option><option>Dosimetry</option></select></label>
+  <label>Forecast horizon <select id="filter-horizon"><option value="4">Next 4 quarters</option><option value="2">Next 2 quarters</option><option value="6">Next 6 quarters</option></select></label>
+  <button id="reload-btn">Reload data</button>
+</div>
 
-// Richer property set used by the new feeds + WO sync. parseAndGeocode_ now reads
-// these and writeFeedExtended_ writes them; writeFeed_ (legacy WO writer) ignores
-// the extras so the WO_HEAT_FEED schema stays unchanged.
-const DEAL_PROPERTIES_EXTENDED = [
-  'dealname', 'wo', 'work_order_start_date', 'service_address',
-  'testing_schedule_summary__c', 'safety_responder_dropdown', 'safety_responder_user',
-  'dealstage', 'pipeline', 'amount', 'deal_currency_code', 'of_techs__c',
-  'closedate', 'createdate',
-  // Workload modeling: testing_days_quantity__c is the primary signal (every deal
-  // should have it per Alex 2026-05-15). Employees-needing-testing is supplementary.
-  'testing_days_quantity__c', 'number_of_employees_needing_testing__c'
-];
+<main>
 
-// ===== Main entry point =====
-function syncWOHeatFeed() {
-  const token = PropertiesService.getScriptProperties().getProperty(HUBSPOT_TOKEN_KEY);
-  if (!token) {
-    throw new Error('Missing HUBSPOT_PRIVATE_APP_TOKEN. Add it in Project Settings → Script Properties.');
-  }
+  <div class="assumptions">
+    <b>How the forecast works.</b>
+    Demand = (open Rebook + ECNS + New Business deals) × stage probability × workload (<code>testing_days_quantity × of_techs</code>), bucketed into the quarter of the deal's expected start date. Stage probabilities are HubSpot-style: <code>Qualification 10%</code>, <code>Proposal Sent 30%</code>, <code>Scheduling 70%</code>, <code>Scheduled 95%</code>. Capacity = schedulable responders per region × 60 working days/quarter. Gap = demand − capacity; positive means the region needs more responders. Hiring suggestion assumes each new responder adds 60 tech-days of quarterly capacity.
+  </div>
 
-  const today = new Date();
-  const end = new Date(today.getTime() + WINDOW_DAYS * 86400000);
-  const startStr = ymd_(today);
-  const endStr = ymd_(end);
+  <div class="cards">
+    <div class="card accent">
+      <div class="label">Open Pipeline $</div>
+      <div class="value" id="kpi-pipeline">—</div>
+      <div class="sub">All open deals (Rebook + ECNS + New Biz)</div>
+    </div>
+    <div class="card accent3">
+      <div class="label">Expected Close $ (12 mo)</div>
+      <div class="value" id="kpi-expected">—</div>
+      <div class="sub">Pipeline × stage probability</div>
+    </div>
+    <div class="card accent4">
+      <div class="label">Closed Won (3 yr)</div>
+      <div class="value" id="kpi-closed-won">—</div>
+      <div class="sub" id="kpi-closed-won-sub">— deals total</div>
+    </div>
+    <div class="card accent2">
+      <div class="label">Schedulable Responders</div>
+      <div class="value" id="kpi-responders">—</div>
+      <div class="sub">Excludes managers/SDM and on-leave</div>
+    </div>
+  </div>
 
-  Logger.log('Pulling deals between %s and %s', startStr, endStr);
-  const deals = fetchAllDeals_(token, startStr, endStr);
-  Logger.log('Fetched %s deals', deals.length);
+  <div class="row">
+    <div class="panel">
+      <h2>Quarterly Workload Forecast</h2>
+      <div class="h-sub">Tech-days of demand vs. capacity, by region. Bars stacked by pipeline source.</div>
+      <div class="chart-wrap tall"><canvas id="chart-workload"></canvas></div>
+    </div>
+    <div class="panel">
+      <h2>Seasonality — Closed Won by Month</h2>
+      <div class="h-sub">Last 3 years of Closed Won deals, averaged by calendar month. Surfaces peaks and lulls.</div>
+      <div class="chart-wrap tall"><canvas id="chart-seasonality"></canvas></div>
+    </div>
+  </div>
 
-  // Build {userId: name} map so we can translate safety_responder_user values
-  // (numeric HubSpot user/owner IDs, sometimes ";"-separated for multi-responder jobs)
-  // into readable names whenever the safety_responder_dropdown is blank.
-  // Step 1: property-options metadata covers the dropdown values shown in the HubSpot UI.
-  // Step 2: any IDs found on actual deals that aren't in that list (e.g. HubSpot owner IDs
-  // from the broader user system) are resolved via the Owners API and cached.
-  const userMap = fetchUserResponderMap_(token);
-  const idsOnDeals = {};
-  deals.forEach(function(d) {
-    const raw = (d.properties && d.properties.safety_responder_user) || '';
-    String(raw).split(';').forEach(function(id) {
-      const t = id.trim();
-      if (t && !userMap[t]) idsOnDeals[t] = true;
-    });
-  });
-  const unknownIds = Object.keys(idsOnDeals);
-  if (unknownIds.length > 0) {
-    const owners = fetchOwnerNames_(token, unknownIds);
-    Object.keys(owners).forEach(function(k) { userMap[k] = owners[k]; });
-    Logger.log('Resolved %s additional owner IDs via Owners API', Object.keys(owners).length);
-  }
+  <div class="row single">
+    <div class="panel">
+      <h2>Hiring Priority — Next 12 Months by Region</h2>
+      <div class="h-sub">Demand and capacity rolled forward 12 months. Positive gap = understaffed; suggested hires = ceil(gap / 240 tech-days per responder per year).</div>
+      <table class="priority-table" id="hiring-table">
+        <thead>
+          <tr>
+            <th>Region</th>
+            <th style="text-align:right">Current Responders</th>
+            <th style="text-align:right">Projected Demand (tech-days)</th>
+            <th style="text-align:right">Capacity (tech-days)</th>
+            <th style="text-align:right">Gap</th>
+            <th style="text-align:right">Suggested Hires</th>
+          </tr>
+        </thead>
+        <tbody id="hiring-body"><tr><td colspan="6" style="color:var(--muted);font-style:italic;text-align:center;padding:20px;">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
 
-  let geocodedCount = 0;
-  let cachedCount = 0;
-  const rows = deals.map(function(d) {
-    const r = parseAndGeocode_(d, userMap);
-    if (r._fromCache) cachedCount++; else if (r.lat !== null) geocodedCount++;
-    return r;
-  });
-  Logger.log('Geocoded %s new + %s cached', geocodedCount, cachedCount);
+  <div class="row single" id="capacity-settings-row" style="margin-bottom:20px;">
+    <div class="panel">
+      <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;" id="cap-toggle">
+        <div>
+          <h2 style="margin:0;">Responder Capacity Settings</h2>
+          <div class="h-sub" style="margin-bottom:0;">Days/quarter each responder is available for field testing. Saved in your browser. Overrides the flat 60-day default.</div>
+        </div>
+        <span id="cap-chevron" style="font-size:18px;color:var(--muted);user-select:none;">▸</span>
+      </div>
+      <div id="cap-body" style="display:none;margin-top:14px;">
+        <div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;">
+          <button id="cap-reset-btn" style="font-size:12px;padding:5px 12px;border:1px solid var(--border-strong);background:#fff;border-radius:5px;cursor:pointer;">Reset all to defaults</button>
+          <span style="font-size:12px;color:var(--muted);align-self:center;">Changes save automatically and update the forecast.</span>
+        </div>
+        <table class="priority-table" id="cap-table">
+          <thead><tr>
+            <th>Name</th>
+            <th>Region</th>
+            <th style="max-width:300px;">Notes excerpt</th>
+            <th style="text-align:right;width:130px;">Days / Quarter</th>
+          </tr></thead>
+          <tbody id="cap-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
 
-  writeFeed_(rows);
-  writeMeta_(rows.length, geocodedCount, cachedCount);
+  <div class="row">
+    <div class="panel">
+      <h2>Open Pipeline by Stage</h2>
+      <div class="h-sub">Where deals sit right now across Rebook, ECNS, and New Business pipelines. Width = count of deals.</div>
+      <div class="funnel" id="funnel"></div>
+    </div>
+    <div class="panel">
+      <h2>Closed Won — Last 36 Months</h2>
+      <div class="h-sub">Monthly trend across all regions. Captures growth direction and seasonal volatility.</div>
+      <div class="chart-wrap"><canvas id="chart-trend"></canvas></div>
+    </div>
+  </div>
+
+</main>
+
+<div class="status" id="status">Initializing…</div>
+
+<script>
+// ============================================================
+// CONFIG — must match the Apps Script tab names
+// ============================================================
+const SHEET_ID = '14VbFR3dKRCb2LoalZQxTYMSN8g_IXhmCDQci3112D50';
+const CLOSED_WON_TAB = 'CLOSED_WON_FEED';
+const NEW_BIZ_TAB    = 'NEW_BIZ_FEED';
+const REBOOK_TAB     = 'REBOOK_FEED';
+const ECNS_TAB       = 'ECNS_FEED';
+const RESPONDER_TAB  = 'MASTER';
+const META_TAB       = 'WO_HEAT_META';
+
+// Stage probabilities — HubSpot-style defaults. Adjust here to recalibrate the forecast.
+// Keys match the stage *label* (case-insensitive) since stage IDs vary across pipelines.
+const STAGE_PROBABILITY = {
+  'qualification':                    0.10,
+  'proposal sent':                    0.30,
+  'scheduling and contract negotiation': 0.70,
+  'scheduled':                        0.95,
+  'on hold - reschedule/cancellation': 0.20,
+  'closed won':                       1.00,
+  'closed lost':                      0.00
+};
+
+// Working days per quarter — used for capacity math (1 responder × 60 days = 60 tech-days/qtr).
+const WORKING_DAYS_PER_QUARTER = 60;
+// Annualized: ~240 tech-days/yr per responder.
+const ANNUAL_CAPACITY_PER_RESPONDER = 240;
+
+const REGION_DEFAULTS = {
+  CT:'NE', ME:'NE', MA:'NE', NH:'NE', NJ:'NE', NY:'NE', PA:'NE', RI:'NE', VT:'NE',
+  AL:'SE', AR:'SE', DC:'SE', DE:'SE', FL:'SE', GA:'SE', KY:'SE', LA:'SE', MD:'SE',
+  MS:'SE', NC:'SE', SC:'SE', TN:'SE', VA:'SE', WV:'SE',
+  IL:'C',  IN:'C',  IA:'C',  KS:'C',  MI:'C',  MN:'C',  MO:'C',  NE:'C',  ND:'C',
+  OH:'C',  OK:'C',  SD:'C',  TX:'C',  WI:'C',
+  AK:'W',  AZ:'W',  CA:'W',  CO:'W',  HI:'W',  ID:'W',  MT:'W',  NV:'W',  NM:'W',
+  OR:'W',  UT:'W',  WA:'W',  WY:'W'
+};
+
+const REGIONS = ['NE', 'SE', 'C', 'W'];
+const REGION_COLOR = { 'NE': '#2563eb', 'SE': '#16a34a', 'C': '#d97706', 'W': '#8b5cf6' };
+
+// ============================================================
+// State
+// ============================================================
+let cwonData = [], rebookData = [], ecnsData = [], newBizData = [], respData = [];
+let stateToRegion = Object.assign({}, REGION_DEFAULTS);
+let charts = {}; // Chart.js instances keyed by canvas id
+let CAPACITY_OVERRIDES = {}; // name → days/quarter, persisted in localStorage
+
+function loadCapacityOverrides() {
+  try { CAPACITY_OVERRIDES = JSON.parse(localStorage.getItem('mhd_cap_overrides') || '{}'); }
+  catch(e) { CAPACITY_OVERRIDES = {}; }
+}
+function saveCapacityOverrides() {
+  try { localStorage.setItem('mhd_cap_overrides', JSON.stringify(CAPACITY_OVERRIDES)); }
+  catch(e) {}
 }
 
-// ===== HubSpot pagination =====
-function fetchAllDeals_(token, startDate, endDate) {
-  // HubSpot v3 search API requires date properties as epoch milliseconds (as strings),
-  // not ISO date strings. Convert "2026-05-14" -> "1778716800000" (UTC midnight).
-  const sParts = startDate.split('-').map(Number);  // [yyyy, mm, dd]
-  const eParts = endDate.split('-').map(Number);
-  const startMs = String(Date.UTC(sParts[0], sParts[1] - 1, sParts[2]));
-  const endMs   = String(Date.UTC(eParts[0], eParts[1] - 1, eParts[2]));
-
-  const all = [];
-  let after = null;
-  let safetyCounter = 0;
-  while (safetyCounter++ < 50) {  // hard cap at 5000 deals
-    const body = {
-      filterGroups: [{
-        filters: [
-          { propertyName: 'wo', operator: 'HAS_PROPERTY' },
-          { propertyName: 'work_order_start_date', operator: 'BETWEEN', value: startMs, highValue: endMs },
-          { propertyName: 'dealstage', operator: 'NOT_IN', values: EXCLUDED_STAGE_IDS }
-        ]
-      }],
-      properties: DEAL_PROPERTIES_EXTENDED,
-      sorts: [{ propertyName: 'work_order_start_date', direction: 'ASCENDING' }],
-      limit: PAGE_SIZE
-    };
-    if (after) body.after = after;
-    const res = UrlFetchApp.fetch(HUBSPOT_API, {
-      method: 'post',
-      contentType: 'application/json',
-      headers: { Authorization: 'Bearer ' + token },
-      payload: JSON.stringify(body),
-      muteHttpExceptions: true
-    });
-    const code = res.getResponseCode();
-    const text = res.getContentText();
-    if (code !== 200) {
-      // Log the request body to make future failures easier to debug.
-      Logger.log('HubSpot request body that failed: %s', JSON.stringify(body));
-      throw new Error('HubSpot API ' + code + ': ' + text.substring(0, 500));
-    }
-    const data = JSON.parse(text);
-    if (data.results) all.push.apply(all, data.results);
-    if (data.paging && data.paging.next && data.paging.next.after) {
-      after = data.paging.next.after;
-    } else {
-      break;
-    }
-  }
-  return all;
+// Parse Notes column for a capacity hint. Returns null if nothing found.
+function notesCapacityHint(notes) {
+  const n = (notes || '').toLowerCase();
+  if (/inactive/.test(n)) return 0;
+  // "2 days/week", "3 days a week", etc.
+  const m = n.match(/\b([1-5])\s*days?\s*(?:a|per)\s*week/);
+  if (m) return Math.round(parseInt(m[1]) * 13 * 0.75); // 13 wks/qtr, ~75% utilization
+  return null;
 }
 
-// Look up names for HubSpot owner IDs that aren't in the property's option list.
-// Per-ID GET against /crm/v3/owners/{id}; results cached in Script Properties so subsequent
-// syncs don't re-fetch. Use clearOwnerCache() to invalidate (e.g. after renames).
-function fetchOwnerNames_(token, ids) {
-  const out = {};
-  const props = PropertiesService.getScriptProperties();
-  ids.forEach(function(id) {
-    const cacheKey = 'owner:' + id;
-    const cached = props.getProperty(cacheKey);
-    if (cached) { out[String(id)] = cached; return; }
-    try {
-      const res = UrlFetchApp.fetch('https://api.hubapi.com/crm/v3/owners/' + encodeURIComponent(id), {
-        method: 'get',
-        headers: { Authorization: 'Bearer ' + token },
-        muteHttpExceptions: true
-      });
-      if (res.getResponseCode() === 200) {
-        const data = JSON.parse(res.getContentText());
-        const name = ((data.firstName || '') + ' ' + (data.lastName || '')).trim() || data.email || String(id);
-        out[String(id)] = name;
-        props.setProperty(cacheKey, name);
-      } else {
-        Logger.log('Owners lookup failed for %s: %s', id, res.getResponseCode());
-      }
-    } catch (e) {
-      Logger.log('Owners lookup error for %s: %s', id, e);
-    }
-  });
-  return out;
-}
-
-// Resolve a raw safety_responder_user value (which may be ";"-separated) into
-// human-readable names joined by " / ", using the prebuilt userMap.
-// Falls back to the raw ID if a lookup fails, so the cell is never silently empty.
-function resolveResponderNames_(raw, userMap) {
-  if (!raw) return '';
-  return String(raw)
-    .split(';')
-    .map(function(id) { return id.trim(); })
-    .filter(Boolean)
-    .map(function(id) { return (userMap && userMap[id]) ? userMap[id] : id; })
-    .join(' / ');
-}
-
-// Fetch the option list for the `safety_responder_user` enumeration property so we
-// can translate its numeric HubSpot-user-ID values (e.g. "2024601") into names
-// (e.g. "Brian Appleby") at write time. Cheaper than calling the Owners API per deal.
-function fetchUserResponderMap_(token) {
-  const url = 'https://api.hubapi.com/crm/v3/properties/deals/safety_responder_user';
-  try {
-    const res = UrlFetchApp.fetch(url, {
-      method: 'get',
-      headers: { Authorization: 'Bearer ' + token },
-      muteHttpExceptions: true
-    });
-    if (res.getResponseCode() !== 200) {
-      Logger.log('safety_responder_user property fetch failed: %s', res.getContentText().substring(0, 300));
-      return {};
-    }
-    const data = JSON.parse(res.getContentText());
-    const map = {};
-    (data.options || []).forEach(function(opt) {
-      if (opt && opt.value != null) map[String(opt.value)] = opt.label || String(opt.value);
-    });
-    Logger.log('Loaded %s user-responder options', Object.keys(map).length);
-    return map;
-  } catch (e) {
-    Logger.log('safety_responder_user fetch error: %s', e);
-    return {};
-  }
-}
-
-// ===== Address parsing + geocoding =====
-function parseAndGeocode_(deal, userMap) {
-  const p = deal.properties || {};
-  const dealId = deal.id || '';
-  const addr = (p.service_address || '').trim();
-  let city = null, state = null, county = null, lat = null, lng = null, fromCache = false;
-
-  // "Street, City, State, Zip" or "Street, City, State Zip"
-  const m1 = addr.match(/^.+?,\s*([^,]+?)\s*,\s*([A-Z]{2})\s*,?\s*\d{5}/i);
-  const m2 = addr.match(/,\s*([^,]+?)\s+([A-Z]{2})\s+\d{5}\s*$/);
-  const m = m1 || m2;
-  if (m) {
-    city = m[1].trim();
-    state = m[2].toUpperCase();
-  } else {
-    // Fallback: parse from schedule summary's trailing "- City, ST"
-    const sum = p.testing_schedule_summary__c || '';
-    const sm = sum.match(/-\s*([A-Za-z .'\-]{2,40}),\s*([A-Z]{2})\s*$/m);
-    if (sm) {
-      city = sm[1].trim();
-      state = sm[2].toUpperCase();
-    }
-  }
-
-  if (city && state) {
-    const cached = getCachedGeocode_(city, state);
-    if (cached && cached.county) {
-      lat = cached.lat; lng = cached.lng; county = cached.county; fromCache = true;
-    } else {
-      try {
-        const geo = Maps.newGeocoder().setRegion('us').geocode(city + ', ' + state + ', USA');
-        if (geo && geo.results && geo.results.length > 0) {
-          const res = geo.results[0];
-          lat = res.geometry.location.lat;
-          lng = res.geometry.location.lng;
-          // Google returns county as administrative_area_level_2 ("Denver County" etc.)
-          const comps = res.address_components || [];
-          for (let i = 0; i < comps.length; i++) {
-            const types = comps[i].types || [];
-            if (types.indexOf('administrative_area_level_2') !== -1) {
-              county = (comps[i].long_name || '').replace(/\s+County$/i, '');
-              break;
-            }
-          }
-          setCachedGeocode_(city, state, lat, lng, county);
-        }
-      } catch (e) {
-        Logger.log('Geocode error for %s, %s: %s', city, state, e);
-      }
-    }
-  }
-
-  // Responder name resolution.
-  // 1) Prefer safety_responder_dropdown — its values are already names ("Andres Torres").
-  //    May contain multiple, ";"-separated; pass through resolver to normalize joiner.
-  // 2) Fall back to safety_responder_user — numeric HubSpot user/owner IDs,
-  //    also possibly ";"-separated. Resolve via userMap (property options + Owners API).
-  const dropdownVal = (p.safety_responder_dropdown || '').toString().trim();
-  const userVal = (p.safety_responder_user || '').toString().trim();
-  let responder = '';
-  if (dropdownVal) {
-    // Dropdown values are already names; if multi-value, normalize the separator.
-    responder = dropdownVal.indexOf(';') !== -1
-      ? dropdownVal.split(';').map(function(s) { return s.trim(); }).filter(Boolean).join(' / ')
-      : dropdownVal;
-  } else if (userVal) {
-    responder = resolveResponderNames_(userVal, userMap || {});
-  }
-  const dealUrl = dealId
-    ? 'https://app.hubspot.com/contacts/' + HUBSPOT_PORTAL_ID + '/record/0-3/' + dealId
-    : '';
-
-  return {
-    wo: p.wo || '',
-    dealname: p.dealname || '',
-    start: p.work_order_start_date || '',
-    address: addr,
-    city: city,
-    county: county,
-    state: state,
-    lat: lat,
-    lng: lng,
-    summary: p.testing_schedule_summary__c || '',
-    responder: responder,
-    dealId: dealId,
-    dealUrl: dealUrl,
-    // Extended fields used by the Closed Won / pipeline syncs (and forecast page).
-    // The WO sync writer ignores them; the extended writer reads them.
-    pipeline: p.pipeline || '',
-    dealstage: p.dealstage || '',
-    amount: p.amount || '',
-    techs: p.of_techs__c || '',
-    testingDays: p.testing_days_quantity__c || '',
-    employees: p.number_of_employees_needing_testing__c || '',
-    closedate: p.closedate || '',
-    createdate: p.createdate || '',
-    _fromCache: fromCache
-  };
-}
-
-// ===== Persistent geocode cache (Script Properties; survives across runs) =====
-// Prefix bumped from "geo:" → "geo2:" when county was added — old entries are ignored,
-// causing one-time re-geocoding to populate county. clearGeocodeCache() clears both.
-function geocodeKey_(city, state) {
-  return 'geo2:' + city.toLowerCase() + '|' + state.toUpperCase();
-}
-
-function getCachedGeocode_(city, state) {
-  const key = geocodeKey_(city, state);
-  const val = PropertiesService.getScriptProperties().getProperty(key);
-  return val ? JSON.parse(val) : null;
-}
-
-function setCachedGeocode_(city, state, lat, lng, county) {
-  PropertiesService.getScriptProperties().setProperty(
-    geocodeKey_(city, state),
-    JSON.stringify({ lat: lat, lng: lng, county: county || null })
-  );
-}
-
-// ===== Sheet writers =====
-function writeFeed_(rows) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  let sheet = ss.getSheetByName(FEED_SHEET_NAME);
-  if (!sheet) sheet = ss.insertSheet(FEED_SHEET_NAME);
-  sheet.clearContents();
-  const header = ['WO', 'Deal Name', 'Start Date', 'Address', 'City', 'County', 'State', 'Lat', 'Lng', 'Schedule Summary', 'Responder', 'Deal ID', 'Deal URL'];
-  const data = [header];
-  rows.forEach(function(r) {
-    data.push([r.wo, r.dealname, r.start, r.address, r.city, r.county, r.state, r.lat, r.lng, r.summary, r.responder, r.dealId, r.dealUrl]);
-  });
-  if (data.length > 1) {
-    sheet.getRange(1, 1, data.length, header.length).setValues(data);
-  } else {
-    sheet.getRange(1, 1, 1, header.length).setValues([header]);
-  }
-  sheet.setFrozenRows(1);
-}
-
-function writeMeta_(total, fresh, cached) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  let sheet = ss.getSheetByName(META_SHEET_NAME);
-  if (!sheet) sheet = ss.insertSheet(META_SHEET_NAME);
-  sheet.clearContents();
-  const now = Utilities.formatDate(new Date(), 'UTC', "yyyy-MM-dd'T'HH:mm:ss'Z'");
-  sheet.getRange(1, 1, 4, 2).setValues([
-    ['updated_at', now],
-    ['total_deals', total],
-    ['geocoded_this_run', fresh],
-    ['from_cache', cached]
-  ]);
+// Returns the effective capacity days/quarter for a schedulable responder.
+function getRespCapacityDays(resp) {
+  const key = resp.name.trim();
+  if (CAPACITY_OVERRIDES[key] != null) return Number(CAPACITY_OVERRIDES[key]);
+  const hint = notesCapacityHint(resp.notes);
+  if (hint != null) return hint;
+  return WORKING_DAYS_PER_QUARTER;
 }
 
 // ============================================================
-// NEW FEEDS — Closed Won historical + open pipeline forecasts
+// Helpers
 // ============================================================
-
-// Convenience: runs the 3 open-pipeline syncs in sequence. Called by the hourly trigger
-// alongside the existing WO sync via syncAllHourly_.
-function syncAllPipelines() {
-  syncNewBizPipeline();
-  syncRebookPipeline();
-  syncEcnsPipeline();
+function gvizCsv(sheetName, range) {
+  let url = 'https://docs.google.com/spreadsheets/d/' + SHEET_ID + '/gviz/tq?tqx=out:csv&sheet=' + encodeURIComponent(sheetName);
+  if (range) url += '&range=' + encodeURIComponent(range);
+  return url;
+}
+function fetchCsv(url) {
+  return new Promise((resolve) => {
+    Papa.parse(url, {
+      download: true, header: true, skipEmptyLines: true,
+      complete: (res) => resolve(res.data),
+      error: () => resolve([])
+    });
+  });
+}
+function parseDate(s) {
+  if (!s) return null;
+  const str = String(s).trim();
+  if (/^\d+$/.test(str)) return new Date(parseInt(str, 10));
+  const d = new Date(str);
+  return isNaN(d.getTime()) ? null : d;
+}
+function setStatus(msg) { document.getElementById('status').textContent = msg; }
+function fmt$(n) { return n > 0 ? '$' + Math.round(n).toLocaleString('en-US') : '$0'; }
+function fmtShort$(n) {
+  if (n >= 1e6) return '$' + (n / 1e6).toFixed(1) + 'M';
+  if (n >= 1e3) return '$' + (n / 1e3).toFixed(0) + 'K';
+  return '$' + Math.round(n);
+}
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+function stateRegion(state) {
+  return stateToRegion[(state || '').toUpperCase().trim()] || null;
 }
 
-// Top-level hourly handler — replaces syncWOHeatFeed as the trigger target so the same
-// hourly cycle also refreshes the pipeline feeds. Closed Won is on a separate weekly
-// trigger because the data barely moves and the volume is large.
-function syncAllHourly() {
-  syncWOHeatFeed();
-  syncAllPipelines();
+// Build state→region map from responders' actual home states (overrides Census defaults).
+function buildStateRegionMap() {
+  stateToRegion = Object.assign({}, REGION_DEFAULTS);
+  const tally = {};
+  respData.forEach(r => {
+    const st = (r.state || '').toUpperCase().trim();
+    const rgRaw = (r.region || '').toUpperCase().trim();
+    if (!st || !rgRaw) return;
+    const m = rgRaw.match(/^(NE|SE|W|C)\b/);
+    if (!m) return;
+    const rg = m[1];
+    tally[st] = tally[st] || {};
+    tally[st][rg] = (tally[st][rg] || 0) + 1;
+  });
+  Object.keys(tally).forEach(st => {
+    const best = Object.entries(tally[st]).sort((a, b) => b[1] - a[1])[0];
+    if (best) stateToRegion[st] = best[0];
+  });
 }
 
-function syncNewBizPipeline() {
-  syncOpenPipelineDeals_(getToken_(), PIPELINE_NEW_BIZ, NEW_BIZ_FEED_SHEET, 'New Business');
-}
-function syncRebookPipeline() {
-  syncOpenPipelineDeals_(getToken_(), PIPELINE_REBOOK, REBOOK_FEED_SHEET, 'Rebook');
-}
-function syncEcnsPipeline() {
-  syncOpenPipelineDeals_(getToken_(), PIPELINE_ECNS, ECNS_FEED_SHEET, 'ECNS');
+// Forecast unit = "tech-days" = testing_days_quantity × #_of_techs.
+// Defaults if either field is missing: 1 day × 1 tech = 1 tech-day.
+function dealWorkload(d) {
+  const td = (d.testingDays > 0 ? d.testingDays : 1);
+  const tc = (d.techs > 0 ? d.techs : 1);
+  return td * tc;
 }
 
-// Shared open-deals fetch + write. Pipeline-scoped so each layer gets its own tab.
-// Excludes Closed Lost, On Hold, AND Closed Won — leaves only deals currently in flight.
-function syncOpenPipelineDeals_(token, pipelineId, sheetName, label) {
-  Logger.log('Syncing open %s deals (pipeline %s)…', label, pipelineId);
-  const filters = [
-    { propertyName: 'pipeline',  operator: 'EQ',     value: pipelineId },
-    { propertyName: 'dealstage', operator: 'NOT_IN', values: EXCLUDED_STAGE_IDS.concat(CLOSED_WON_STAGE_IDS) }
-  ];
-  const deals = fetchDealsBatched_(token, filters, 100); // 100 pages × 100 = 10K cap
-  Logger.log('  → %s deals', deals.length);
-  const userMap = buildUserMapForDeals_(token, deals);
-  const rows = deals.map(function(d) { return parseAndGeocode_(d, userMap); });
-  writeFeedExtended_(sheetName, rows);
+// Stage probability — lookup by lowercase label. Default 50% if unknown.
+function stageProbability(stage) {
+  const key = (stage || '').toString().toLowerCase().trim();
+  if (STAGE_PROBABILITY[key] != null) return STAGE_PROBABILITY[key];
+  // Fuzzy: partial match for HubSpot's slightly-different labels.
+  for (const k in STAGE_PROBABILITY) {
+    if (key.indexOf(k) !== -1 || k.indexOf(key) !== -1) return STAGE_PROBABILITY[k];
+  }
+  return 0.5;
 }
 
-// Closed Won historical (last 3 years across all pipelines). Run weekly — Closed Won
-// rarely changes and the volume is high. Batches by year to safely stay under
-// HubSpot's 10K-results-per-search cap.
-function syncClosedWonHistorical() {
-  const token = getToken_();
+// Returns the {year, quarter} that contains `date`.
+function dateToQuarter(date) {
+  return { year: date.getFullYear(), quarter: Math.floor(date.getMonth() / 3) + 1 };
+}
+function quarterLabel(qInfo) { return 'Q' + qInfo.quarter + ' ' + String(qInfo.year).slice(-2); }
+function quarterFromOffset(offset) {
+  // offset 0 = current quarter, 1 = next, etc.
   const now = new Date();
-  let allDeals = [];
-  for (let yr = 0; yr < CLOSED_WON_LOOKBACK_YEARS; yr++) {
-    const winEnd   = new Date(now); winEnd.setFullYear(winEnd.getFullYear() - yr);
-    const winStart = new Date(now); winStart.setFullYear(winStart.getFullYear() - (yr + 1));
-    const filters = [
-      { propertyName: 'dealstage', operator: 'IN',      values: CLOSED_WON_STAGE_IDS },
-      { propertyName: 'closedate', operator: 'BETWEEN', value: String(winStart.getTime()), highValue: String(winEnd.getTime()) }
-    ];
-    Logger.log('Closed Won: year %s..%s', winStart.getFullYear(), winEnd.getFullYear());
-    const yearDeals = fetchDealsBatched_(token, filters, 100);
-    Logger.log('  → %s deals', yearDeals.length);
-    allDeals = allDeals.concat(yearDeals);
-  }
-  Logger.log('Total Closed Won over %s yrs: %s', CLOSED_WON_LOOKBACK_YEARS, allDeals.length);
-  const userMap = buildUserMapForDeals_(token, allDeals);
-  const rows = allDeals.map(function(d) { return parseAndGeocode_(d, userMap); });
-  writeFeedExtended_(CLOSED_WON_FEED_SHEET, rows);
+  const q0 = Math.floor(now.getMonth() / 3);
+  const totalQ = q0 + offset;
+  return { year: now.getFullYear() + Math.floor(totalQ / 4), quarter: (totalQ % 4 + 4) % 4 + 1 };
 }
 
-// Generic paginated HubSpot search. Filters is the inner array of one filterGroup.
-// safetyPages caps how many pages of PAGE_SIZE we'll walk (default 100 → 10K max).
-function fetchDealsBatched_(token, filters, safetyPages) {
-  const cap = safetyPages || 50;
-  const all = [];
-  let after = null;
-  let counter = 0;
-  while (counter++ < cap) {
-    const body = {
-      filterGroups: [{ filters: filters }],
-      properties: DEAL_PROPERTIES_EXTENDED,
-      sorts: [{ propertyName: 'createdate', direction: 'DESCENDING' }],
-      limit: PAGE_SIZE
+// Service matching — same logic as the heat map, lightweight version.
+const SERVICE_FILTER_MAP = {
+  'Audio':     ['audio', 'audiometric'],
+  'ResFit':    ['fit test', 'respirator fit', ' qn ', ' ql ', 'quantitative', 'qualitative'],
+  'MEQ':       ['meq', 'medical evaluation'],
+  'Air':       ['air monitor'],
+  'NLS':       ['noise level'],
+  'ENLS':      ['environmental noise', 'enls'],
+  'Dosimetry': ['dosimet']
+};
+function dealMatchesService(d, svc) {
+  if (!svc) return true;
+  const text = ((d.name || '') + ' ' + (d.summary || '')).toLowerCase();
+  return (SERVICE_FILTER_MAP[svc] || []).some(needle => text.indexOf(needle) !== -1);
+}
+
+// ============================================================
+// Data load
+// ============================================================
+async function loadAll() {
+  setStatus('Loading 4 feeds + responder roster…');
+  const [cwonRows, rebookRows, ecnsRows, newRows, respRows, metaRows] = await Promise.all([
+    fetchCsv(gvizCsv(CLOSED_WON_TAB)),
+    fetchCsv(gvizCsv(REBOOK_TAB)),
+    fetchCsv(gvizCsv(ECNS_TAB)),
+    fetchCsv(gvizCsv(NEW_BIZ_TAB)),
+    fetchCsv(gvizCsv(RESPONDER_TAB, 'A2:U')),
+    fetchCsv(gvizCsv(META_TAB))
+  ]);
+
+  function parseDeal(r) {
+    return {
+      wo: r['WO'] || '',
+      name: r['Deal Name'] || '',
+      pipeline: r['Pipeline'] || '',
+      stage: r['Stage'] || '',
+      createdate: r['Created Date'] || '',
+      start: r['Start Date'] || '',
+      closedate: r['Close Date'] || '',
+      amount: parseFloat(r['Amount']) || 0,
+      techs: parseFloat(r['# Techs']) || 0,
+      testingDays: parseFloat(r['Testing Days']) || 0,
+      employees: parseFloat(r['# Employees']) || 0,
+      city: r['City'] || '',
+      state: r['State'] || '',
+      summary: r['Schedule Summary'] || '',
+      dealUrl: r['Deal URL'] || ''
     };
-    if (after) body.after = after;
-    const res = UrlFetchApp.fetch(HUBSPOT_API, {
-      method: 'post',
-      contentType: 'application/json',
-      headers: { Authorization: 'Bearer ' + token },
-      payload: JSON.stringify(body),
-      muteHttpExceptions: true
-    });
-    const code = res.getResponseCode();
-    const text = res.getContentText();
-    if (code !== 200) {
-      Logger.log('HubSpot search failed body: %s', JSON.stringify(body));
-      throw new Error('HubSpot API ' + code + ': ' + text.substring(0, 500));
-    }
-    const data = JSON.parse(text);
-    if (data.results) all.push.apply(all, data.results);
-    if (data.paging && data.paging.next && data.paging.next.after) {
-      after = data.paging.next.after;
-    } else {
-      break;
-    }
   }
-  return all;
+  cwonData   = cwonRows.map(parseDeal);
+  rebookData = rebookRows.map(parseDeal);
+  ecnsData   = ecnsRows.map(parseDeal);
+  newBizData = newRows.map(parseDeal);
+
+  respData = respRows.map(r => ({
+    name: r['Name'] || '',
+    region: r['Region'] || '',
+    state: r['Home State'] || '',
+    title: r['Title'] || '',
+    notes: r['Notes / Idiosyncrasies'] || '',
+    rating: parseInt(r['Svc Rating'] || '0', 10) || 0
+  })).filter(r => r.name);
+  buildStateRegionMap();
+
+  const meta = {};
+  metaRows.forEach(r => { meta[r['Key'] || r[0]] = r['Value'] || r[1]; });
+  document.getElementById('meta').textContent =
+    cwonData.length + ' Closed Won · ' + rebookData.length + ' Rebook · ' +
+    ecnsData.length + ' ECNS · ' + newBizData.length + ' New Biz · ' +
+    respData.length + ' responders' +
+    (meta['updated_at'] ? ' · last WO sync ' + meta['updated_at'] : '');
+
+  setStatus('Ready.');
+  redraw();
 }
 
-// Builds the {id → name} responder map from property options + Owners API for any
-// IDs that appear on these specific deals but aren't in the property options list.
-function buildUserMapForDeals_(token, deals) {
-  const userMap = fetchUserResponderMap_(token);
-  const unknown = {};
-  deals.forEach(function(d) {
-    const raw = (d.properties && d.properties.safety_responder_user) || '';
-    String(raw).split(';').forEach(function(id) {
-      const t = id.trim();
-      if (t && !userMap[t]) unknown[t] = true;
-    });
+// ============================================================
+// Forecast model + render
+// ============================================================
+function isSchedulable(r) {
+  const lead = /Lead|Manager|SDM/i.test(r.region || '') || /Manager|Director|SDM/i.test(r.title || '');
+  const onLeave = /leave/i.test(r.notes || '');
+  return !lead && !onLeave;
+}
+
+function applyFilters(deals, region, service) {
+  return deals.filter(d => {
+    if (region && stateRegion(d.state) !== region) return false;
+    if (service && !dealMatchesService(d, service)) return false;
+    return true;
   });
-  const ids = Object.keys(unknown);
-  if (ids.length > 0) {
-    const owners = fetchOwnerNames_(token, ids);
-    Object.keys(owners).forEach(function(k) { userMap[k] = owners[k]; });
-  }
-  return userMap;
 }
 
-// Writes a feed with the richer schema (used by Closed Won + the 3 pipeline tabs).
-// The heat-map page and forecast page parse these columns by header name.
-function writeFeedExtended_(sheetName, rows) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  let sheet = ss.getSheetByName(sheetName);
-  if (!sheet) sheet = ss.insertSheet(sheetName);
-  sheet.clearContents();
-  const header = [
-    'WO', 'Deal Name', 'Pipeline', 'Stage', 'Created Date', 'Start Date', 'Close Date',
-    'Amount', '# Techs', 'Testing Days', '# Employees', 'Address', 'City', 'County', 'State', 'Lat', 'Lng',
-    'Schedule Summary', 'Responder', 'Deal ID', 'Deal URL'
+function redraw() {
+  const fRegion = document.getElementById('filter-region').value;
+  const fService = document.getElementById('filter-service').value;
+  const horizon = parseInt(document.getElementById('filter-horizon').value, 10) || 4;
+
+  // Filter datasets
+  const cwon = applyFilters(cwonData, fRegion, fService);
+  const rebook = applyFilters(rebookData, fRegion, fService);
+  const ecns = applyFilters(ecnsData, fRegion, fService);
+  const newBiz = applyFilters(newBizData, fRegion, fService);
+  const openDeals = rebook.concat(ecns).concat(newBiz);
+
+  // ===== KPI cards =====
+  const pipelineTotal = openDeals.reduce((s, d) => s + d.amount, 0);
+  const expectedTotal = openDeals.reduce((s, d) => s + d.amount * stageProbability(d.stage), 0);
+  const cwonTotal = cwon.reduce((s, d) => s + d.amount, 0);
+  const schedResp = respData.filter(isSchedulable).filter(r => !fRegion || (r.region || '').toUpperCase().startsWith(fRegion));
+  document.getElementById('kpi-pipeline').textContent = fmtShort$(pipelineTotal);
+  document.getElementById('kpi-expected').textContent = fmtShort$(expectedTotal);
+  document.getElementById('kpi-closed-won').textContent = fmtShort$(cwonTotal);
+  document.getElementById('kpi-closed-won-sub').textContent = cwon.length.toLocaleString('en-US') + ' deals total';
+  document.getElementById('kpi-responders').textContent = schedResp.length;
+
+  // ===== Quarterly workload forecast =====
+  // For each open deal, contribute (workload × probability) to its expected-close quarter.
+  // Quarter is derived from start date if set; otherwise from createdate + median pipeline lag (60 days fallback).
+  const quarters = [];
+  for (let i = 0; i < horizon; i++) quarters.push(quarterFromOffset(i));
+  const quarterKeys = quarters.map(q => q.year + '-Q' + q.quarter);
+
+  // Per-region per-quarter demand, split by source pipeline.
+  const demand = {}; // region → quarterKey → { rebook: x, ecns: y, newbiz: z }
+  REGIONS.forEach(r => { demand[r] = {}; quarterKeys.forEach(k => demand[r][k] = { rebook: 0, ecns: 0, newbiz: 0 }); });
+
+  function attribute(d, sourceKey) {
+    const region = stateRegion(d.state);
+    if (!region) return;
+    // Prefer start date; fall back to closedate (expected service date), then createdate.
+    let when = parseDate(d.start) || parseDate(d.closedate) || parseDate(d.createdate);
+    if (!when) return;
+    // If the derived date is still in the past (overdue open deal), bucket to current quarter.
+    if (when < new Date()) when = new Date();
+    const qInfo = dateToQuarter(when);
+    const qKey = qInfo.year + '-Q' + qInfo.quarter;
+    if (!demand[region][qKey]) return; // outside the horizon
+    const workload = dealWorkload(d) * stageProbability(d.stage);
+    demand[region][qKey][sourceKey] += workload;
+  }
+  rebook.forEach(d => attribute(d, 'rebook'));
+  ecns.forEach(d => attribute(d, 'ecns'));
+  newBiz.forEach(d => attribute(d, 'newbiz'));
+
+  // Capacity per region per quarter = sum of individual per-responder days (overrideable via UI).
+  const capacity = {};
+  REGIONS.forEach(r => {
+    const total = respData.filter(isSchedulable)
+      .filter(p => (p.region || '').toUpperCase().startsWith(r))
+      .reduce((sum, p) => sum + getRespCapacityDays(p), 0);
+    capacity[r] = total;
+  });
+
+  drawWorkloadChart(quarters, demand, capacity, fRegion);
+  drawCapacitySettings();
+
+  // ===== Seasonality chart (avg Closed Won deals per calendar month, last 3 yrs) =====
+  drawSeasonalityChart(cwon);
+
+  // ===== Hiring priority table =====
+  drawHiringTable(demand, capacity, fRegion);
+
+  // ===== Pipeline funnel =====
+  drawFunnel(rebook, ecns, newBiz);
+
+  // ===== Closed Won 36-month trend =====
+  drawTrendChart(cwon);
+}
+
+function drawWorkloadChart(quarters, demand, capacity, regionFilter) {
+  const ctx = document.getElementById('chart-workload').getContext('2d');
+  if (charts.workload) charts.workload.destroy();
+
+  const regionsShown = regionFilter ? [regionFilter] : REGIONS;
+  const qKeys = quarters.map(q => q.year + '-Q' + q.quarter);
+  const labels = [];
+  regionsShown.forEach(r => qKeys.forEach(q => labels.push(r + '  ' + 'Q' + q.split('-Q')[1] + " '" + q.split('-Q')[0].slice(-2))));
+
+  function vals(source) {
+    const out = [];
+    regionsShown.forEach(r => qKeys.forEach(q => out.push(Math.round(demand[r][q][source]))));
+    return out;
+  }
+  function capVals() {
+    const out = [];
+    regionsShown.forEach(r => qKeys.forEach(() => out.push(capacity[r])));
+    return out;
+  }
+
+  charts.workload = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [
+        { label: 'Rebook',        data: vals('rebook'),  backgroundColor: '#8b5cf6', stack: 'demand' },
+        { label: 'ECNS',          data: vals('ecns'),    backgroundColor: '#14b8a6', stack: 'demand' },
+        { label: 'New Business',  data: vals('newbiz'),  backgroundColor: '#22c55e', stack: 'demand' },
+        { label: 'Capacity',      data: capVals(),       type: 'line', borderColor: '#dc2626', borderWidth: 2, pointRadius: 3, backgroundColor: 'rgba(220,38,38,0.0)', fill: false, tension: 0 }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: {
+        x: { stacked: true, ticks: { font: { size: 10 } } },
+        y: { stacked: true, title: { display: true, text: 'Tech-days' } }
+      },
+      plugins: {
+        legend: { position: 'bottom' },
+        tooltip: { callbacks: { label: (ctx) => ctx.dataset.label + ': ' + Math.round(ctx.parsed.y) + ' tech-days' } }
+      }
+    }
+  });
+}
+
+function drawSeasonalityChart(cwon) {
+  const ctx = document.getElementById('chart-seasonality').getContext('2d');
+  if (charts.seasonality) charts.seasonality.destroy();
+  const counts = new Array(12).fill(0);
+  const yearsSeen = new Set();
+  cwon.forEach(d => {
+    const dt = parseDate(d.closedate);
+    if (!dt) return;
+    counts[dt.getMonth()]++;
+    yearsSeen.add(dt.getFullYear());
+  });
+  const yrs = Math.max(yearsSeen.size, 1);
+  const avg = counts.map(c => c / yrs);
+  charts.seasonality = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],
+      datasets: [{ label: 'Avg Closed Won per month', data: avg, backgroundColor: '#d97706' }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: { y: { title: { display: true, text: 'Avg deals/month' } } },
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => Math.round(c.parsed.y * 10) / 10 + ' avg deals' } } }
+    }
+  });
+}
+
+function drawTrendChart(cwon) {
+  const ctx = document.getElementById('chart-trend').getContext('2d');
+  if (charts.trend) charts.trend.destroy();
+  const byMonth = {};
+  cwon.forEach(d => {
+    const dt = parseDate(d.closedate);
+    if (!dt) return;
+    const k = dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0');
+    byMonth[k] = (byMonth[k] || 0) + 1;
+  });
+  const keys = Object.keys(byMonth).sort();
+  const labels = keys.map(k => {
+    const [y, m] = k.split('-');
+    return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(m, 10) - 1] + " '" + y.slice(-2);
+  });
+  const data = keys.map(k => byMonth[k]);
+  charts.trend = new Chart(ctx, {
+    type: 'line',
+    data: { labels: labels, datasets: [{ label: 'Closed Won deals', data: data, borderColor: '#d97706', backgroundColor: 'rgba(217,119,6,0.15)', fill: true, tension: 0.25, pointRadius: 2 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: { x: { ticks: { maxTicksLimit: 12, font: { size: 10 } } } },
+      plugins: { legend: { display: false } }
+    }
+  });
+}
+
+function drawHiringTable(demand, capacity, regionFilter) {
+  const tbody = document.getElementById('hiring-body');
+  const regionsShown = regionFilter ? [regionFilter] : REGIONS;
+  // 12-month demand = sum of all quarterly demand for that region (within horizon)
+  const rows = regionsShown.map(r => {
+    let demandTotal = 0;
+    Object.keys(demand[r]).forEach(qk => {
+      demandTotal += demand[r][qk].rebook + demand[r][qk].ecns + demand[r][qk].newbiz;
+    });
+    // Annualize the capacity proportionally to horizon (if horizon = 4qtrs, capacity is 4× quarterly)
+    const horizonQs = Object.keys(demand[r]).length;
+    const capTotal = capacity[r] * horizonQs;
+    const gap = demandTotal - capTotal;
+    const currentResp = respData.filter(isSchedulable).filter(p => (p.region || '').toUpperCase().startsWith(r)).length;
+    // Scale suggested hires to the horizon window
+    const annualizedGap = gap * (4 / horizonQs);
+    const suggestHires = annualizedGap > 0 ? Math.ceil(annualizedGap / ANNUAL_CAPACITY_PER_RESPONDER) : 0;
+    return { region: r, currentResp, demandTotal, capTotal, gap, suggestHires };
+  }).sort((a, b) => b.gap - a.gap);
+
+  tbody.innerHTML = rows.map(r => {
+    const gapClass = r.gap > 5 ? 'gap-pos' : (r.gap < -5 ? 'gap-neg' : 'gap-zero');
+    const hiresLabel = r.suggestHires > 0 ? '+' + r.suggestHires : '—';
+    return `
+      <tr>
+        <td><b>${r.region}</b></td>
+        <td style="text-align:right">${r.currentResp}</td>
+        <td style="text-align:right">${Math.round(r.demandTotal).toLocaleString('en-US')}</td>
+        <td style="text-align:right">${Math.round(r.capTotal).toLocaleString('en-US')}</td>
+        <td style="text-align:right" class="${gapClass}">${r.gap > 0 ? '+' : ''}${Math.round(r.gap).toLocaleString('en-US')}</td>
+        <td style="text-align:right" class="hire ${gapClass}">${hiresLabel}</td>
+      </tr>`;
+  }).join('');
+}
+
+function drawFunnel(rebook, ecns, newBiz) {
+  const groups = [
+    { label: 'Rebook', data: rebook, cls: 'rebook' },
+    { label: 'ECNS', data: ecns, cls: 'ecns' },
+    { label: 'New Business', data: newBiz, cls: 'newbiz' }
   ];
-  const data = [header];
-  rows.forEach(function(r) {
-    data.push([
-      r.wo, r.dealname, r.pipeline, r.dealstage, r.createdate, r.start, r.closedate,
-      r.amount, r.techs, r.testingDays, r.employees, r.address, r.city, r.county, r.state, r.lat, r.lng,
-      r.summary, r.responder, r.dealId, r.dealUrl
-    ]);
+  let html = '';
+  const maxCount = Math.max(1, ...groups.flatMap(g => {
+    const tally = {};
+    g.data.forEach(d => { const s = d.stage || '(none)'; tally[s] = (tally[s] || 0) + 1; });
+    return Object.values(tally);
+  }));
+  groups.forEach(g => {
+    const tally = {};
+    g.data.forEach(d => {
+      const s = d.stage || '(no stage)';
+      if (!tally[s]) tally[s] = { count: 0, amount: 0 };
+      tally[s].count++;
+      tally[s].amount += d.amount;
+    });
+    const sorted = Object.entries(tally).sort((a, b) => b[1].count - a[1].count);
+    if (sorted.length === 0) {
+      html += `<div class="funnel-row"><div class="label"><span class="legend-pill ${g.cls}">${g.label}</span></div><div class="funnel-bar"></div><div class="stat" style="color:var(--muted)">no open deals</div></div>`;
+      return;
+    }
+    html += `<div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-top:10px;margin-bottom:4px;">${escapeHtml(g.label)} — ${g.data.length} deal${g.data.length === 1 ? '' : 's'}</div>`;
+    sorted.forEach(([stage, info]) => {
+      const pct = (info.count / maxCount) * 100;
+      html += `<div class="funnel-row">
+        <div class="label">${escapeHtml(stage)}</div>
+        <div class="funnel-bar"><div class="fill ${g.cls}" style="width:${pct}%"></div></div>
+        <div class="stat">${info.count} · ${fmtShort$(info.amount)}</div>
+      </div>`;
+    });
   });
-  if (data.length > 1) {
-    sheet.getRange(1, 1, data.length, header.length).setValues(data);
-  } else {
-    sheet.getRange(1, 1, 1, header.length).setValues([header]);
-  }
-  sheet.setFrozenRows(1);
+  document.getElementById('funnel').innerHTML = html;
 }
 
-// Token retrieval helper — used by all syncs.
-function getToken_() {
-  const token = PropertiesService.getScriptProperties().getProperty(HUBSPOT_TOKEN_KEY);
-  if (!token) throw new Error('Missing HUBSPOT_PRIVATE_APP_TOKEN. Add it in Project Settings → Script Properties.');
-  return token;
-}
-
-// ===== Trigger management =====
-// The hourly trigger calls syncAllHourly (WO + 3 pipeline feeds).
-// Closed Won is on its own weekly trigger — it's a 3-year backfill of thousands of
-// deals and the data barely changes day-to-day.
-function installHourlyTrigger() {
-  // Clear any existing hourly triggers we manage.
-  ScriptApp.getProjectTriggers().forEach(function(t) {
-    const fn = t.getHandlerFunction();
-    if (fn === 'syncWOHeatFeed' || fn === 'syncAllHourly') ScriptApp.deleteTrigger(t);
+function drawCapacitySettings() {
+  const tbody = document.getElementById('cap-tbody');
+  if (!tbody) return;
+  const schedulable = respData.filter(isSchedulable).sort((a, b) => {
+    const ra = (a.region || '').toUpperCase(), rb = (b.region || '').toUpperCase();
+    return ra < rb ? -1 : ra > rb ? 1 : a.name.localeCompare(b.name);
   });
-  ScriptApp.newTrigger('syncAllHourly').timeBased().everyHours(1).create();
-  Logger.log('Installed hourly trigger for syncAllHourly (WO + 3 pipelines)');
-}
+  tbody.innerHTML = schedulable.map(resp => {
+    const key = resp.name.trim();
+    const hint = notesCapacityHint(resp.notes);
+    const defaultVal = hint != null ? hint : WORKING_DAYS_PER_QUARTER;
+    const current = CAPACITY_OVERRIDES[key] != null ? Number(CAPACITY_OVERRIDES[key]) : defaultVal;
+    const isCustom = CAPACITY_OVERRIDES[key] != null && CAPACITY_OVERRIDES[key] !== defaultVal;
+    const notesExcerpt = (resp.notes || '').slice(0, 80) + (resp.notes && resp.notes.length > 80 ? '…' : '');
+    return `<tr>
+      <td><b>${escapeHtml(resp.name)}</b></td>
+      <td>${escapeHtml(resp.region)}</td>
+      <td style="font-size:11px;color:var(--muted);max-width:300px;">${escapeHtml(notesExcerpt)}</td>
+      <td style="text-align:right;">
+        <input type="number" min="0" max="90" step="1"
+          value="${current}"
+          data-default="${defaultVal}"
+          data-name="${escapeHtml(key)}"
+          style="width:70px;padding:4px 6px;border:1px solid ${isCustom ? 'var(--accent)' : 'var(--border-strong)'};border-radius:4px;font-size:13px;text-align:right;font-variant-numeric:tabular-nums;"
+          class="cap-input">
+        ${hint != null ? '<span style="font-size:10px;color:var(--muted);margin-left:4px;" title="Inferred from Notes">★</span>' : ''}
+      </td>
+    </tr>`;
+  }).join('');
 
-function installWeeklyClosedWonTrigger() {
-  ScriptApp.getProjectTriggers().forEach(function(t) {
-    if (t.getHandlerFunction() === 'syncClosedWonHistorical') ScriptApp.deleteTrigger(t);
-  });
-  // Sundays at 2 AM — quiet time, before Monday-morning use.
-  ScriptApp.newTrigger('syncClosedWonHistorical')
-    .timeBased()
-    .onWeekDay(ScriptApp.WeekDay.SUNDAY)
-    .atHour(2)
-    .create();
-  Logger.log('Installed weekly trigger for syncClosedWonHistorical (Sundays 2 AM)');
-}
-
-function removeAllTriggers() {
-  ScriptApp.getProjectTriggers().forEach(function(t) {
-    const fn = t.getHandlerFunction();
-    if (fn === 'syncWOHeatFeed' || fn === 'syncAllHourly' || fn === 'syncClosedWonHistorical') {
-      ScriptApp.deleteTrigger(t);
+  // Wire up input events (delegated)
+  tbody.addEventListener('input', (e) => {
+    if (!e.target.classList.contains('cap-input')) return;
+    const name = e.target.dataset.name;
+    const val = parseFloat(e.target.value);
+    const def = parseFloat(e.target.dataset.default);
+    if (!isNaN(val) && val >= 0) {
+      CAPACITY_OVERRIDES[name] = val;
+      e.target.style.borderColor = (val !== def) ? 'var(--accent)' : 'var(--border-strong)';
+      saveCapacityOverrides();
+      redraw();
     }
   });
-  Logger.log('Removed all managed triggers');
 }
 
-// ===== Utilities =====
-function ymd_(d) {
-  return Utilities.formatDate(d, 'UTC', 'yyyy-MM-dd');
+// ============================================================
+// Init
+// ============================================================
+function bindControls() {
+  ['filter-region', 'filter-service', 'filter-horizon'].forEach(id => {
+    document.getElementById(id).addEventListener('change', redraw);
+  });
+  document.getElementById('reload-btn').addEventListener('click', () => {
+    setStatus('Reloading…');
+    loadAll();
+  });
+
+  // Capacity settings panel toggle
+  document.getElementById('cap-toggle').addEventListener('click', () => {
+    const body = document.getElementById('cap-body');
+    const chev = document.getElementById('cap-chevron');
+    const open = body.style.display !== 'none';
+    body.style.display = open ? 'none' : 'block';
+    chev.textContent = open ? '▸' : '▾';
+  });
+
+  // Reset button
+  document.getElementById('cap-reset-btn').addEventListener('click', () => {
+    CAPACITY_OVERRIDES = {};
+    saveCapacityOverrides();
+    drawCapacitySettings();
+    redraw();
+  });
 }
 
-// ===== Manual maintenance helpers =====
-function clearGeocodeCache() {
-  const props = PropertiesService.getScriptProperties();
-  const all = props.getProperties();
-  let n = 0;
-  for (const k in all) {
-    if (k.indexOf('geo:') === 0 || k.indexOf('geo2:') === 0) { props.deleteProperty(k); n++; }
-  }
-  Logger.log('Cleared %s cached geocodes', n);
-}
-
-function showCacheSize() {
-  const all = PropertiesService.getScriptProperties().getProperties();
-  let geo = 0, owner = 0;
-  for (const k in all) {
-    if (k.indexOf('geo:') === 0 || k.indexOf('geo2:') === 0) geo++;
-    else if (k.indexOf('owner:') === 0) owner++;
-  }
-  Logger.log('%s entries in geocode cache, %s in owner cache', geo, owner);
-}
-
-function clearOwnerCache() {
-  const props = PropertiesService.getScriptProperties();
-  const all = props.getProperties();
-  let n = 0;
-  for (const k in all) {
-    if (k.indexOf('owner:') === 0) { props.deleteProperty(k); n++; }
-  }
-  Logger.log('Cleared %s cached owner names', n);
-}
+bindControls();
+loadCapacityOverrides();
+loadAll();
+</script>
+</body>
+</html>

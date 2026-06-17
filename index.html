@@ -16,7 +16,12 @@ select,input[type=text]{font-size:12px;padding:4px 7px;border-radius:4px;border:
 select option{background:#1F3864}
 input[type=text]{background:#2F5496;color:#fff}
 input[type=text]::placeholder{color:rgba(255,255,255,0.5)}
-#zip-input{width:110px}
+#zip-input{width:110px;padding-right:22px}
+#search{padding-right:22px}
+.zip-wrap{position:relative;display:inline-block}
+.input-clear{position:absolute;right:6px;top:50%;transform:translateY(-50%);cursor:pointer;color:rgba(255,255,255,0.55);font-size:12px;font-weight:bold;display:none;user-select:none;line-height:1;padding:2px 4px;z-index:5;border-radius:3px}
+.input-clear:hover{color:#fff;background:rgba(255,255,255,0.15)}
+.input-clear.show{display:block}
 #zip-btn{background:#27AE60;color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:700}
 #zip-btn:hover{background:#1E8449}
 .toggle-wrap{display:flex;align-items:center;gap:5px;font-size:11px;opacity:.9}
@@ -107,6 +112,7 @@ input:checked+.slider:before{transform:translateX(16px)}
     </div>
     <div class="filter-group search-wrap">
       <input type="text" id="search" placeholder="Search name..." autocomplete="off">
+      <span class="input-clear" id="search-clear" title="Clear">&#x2715;</span>
       <div id="name-dropdown"></div>
     </div>
     <div class="toggle-wrap">
@@ -114,7 +120,10 @@ input:checked+.slider:before{transform:translateX(16px)}
       <span>Show inactive</span>
     </div>
     <div class="filter-group">
-      <input type="text" id="zip-input" placeholder="Zip code...">
+      <div class="zip-wrap">
+        <input type="text" id="zip-input" placeholder="Zip code...">
+        <span class="input-clear" id="zip-clear" title="Clear">&#x2715;</span>
+      </div>
       <button id="zip-btn">Find Nearest</button>
     </div>
     <span id="count-badge">Loading...</span>
@@ -133,6 +142,7 @@ input:checked+.slider:before{transform:translateX(16px)}
       <div class="legend-item"><div class="legend-dot" style="background:#F4D03F"></div><span>5 &mdash; Mid-tier</span></div>
       <div class="legend-item"><div class="legend-dot" style="background:#E67E22"></div><span>4 &mdash; Basic</span></div>
       <div class="legend-item"><div class="legend-dot" style="background:#E74C3C"></div><span>3 &mdash; Audio/Fit only</span></div>
+      <div class="legend-item"><div class="legend-dot" style="background:#000"></div><span>0 &mdash; New hire (untrained)</span></div>
     </div>
     <div id="zip-results">
       <div id="zip-results-header">
@@ -147,7 +157,7 @@ input:checked+.slider:before{transform:translateX(16px)}
 const API_KEY  = "AIzaSyCXalP4vszPKPOVN9Y5pzNbfjJjF4VN7VY";
 const SHEET_ID = "14VbFR3dKRCb2LoalZQxTYMSN8g_IXhmCDQci3112D50";
 const SHEET_URL = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/MASTER!A3:V200?key=${API_KEY}`;
-const RATING_COLORS = {7:"#1E8449",6:"#27AE60",5:"#F4D03F",4:"#E67E22",3:"#E74C3C"};
+const RATING_COLORS = {7:"#1E8449",6:"#27AE60",5:"#F4D03F",4:"#E67E22",3:"#E74C3C",0:"#000000"};
 const COORDS = {
   "Allison, Terri":    {lat:29.5572,lng:-95.7835},
   "Appleby, Brian":    {lat:40.9678,lng:-72.8326},
@@ -181,14 +191,18 @@ const COORDS = {
   "Phillips, Tony":    {lat:35.3960,lng:-80.6206},
   "Riley, Bob":        {lat:35.6729,lng:-81.2201},
   "Robins, David":     {lat:31.7619,lng:-106.4850},
+  "Russo, Frank":      {lat:40.1818,lng:-74.5829},
+  "Schmidt, Kurtis":   {lat:33.4612,lng:-96.7461},
   "Sparger, Jeff":     {lat:31.8479,lng:-106.3009},
   "Staycoff, Rob":     {lat:45.2594,lng:-93.4563},
   "Talps, Bernard":    {lat:33.6773,lng:-84.7388},
   "Torres, Andres":    {lat:36.0060,lng:-115.1854},
   "Tubberville, Jack": {lat:35.5290,lng:-86.5747},
+  "Urrea, Stepanie":   {lat:33.9165,lng:-117.2467},
   "Wagner, James":     {lat:35.8326,lng:-78.6436},
   "Werner, Thomas":    {lat:31.7093,lng:-99.0018},
   "Whicker, Steven":   {lat:39.7084,lng:-86.3027},
+  "Young, Nathan":     {lat:41.0930,lng:-112.0827},
 };
 let map, allTechs=[], markers=[], openInfoWindow=null, searchMarker=null, searchInfoWindow=null, lastSearchedLoc=null;
 function isInactive(t){ return t.notes&&t.notes.toLowerCase().includes("on leave"); }
@@ -326,6 +340,11 @@ function clearSearchMarker(){
   if(searchMarker){ searchMarker.setMap(null); searchMarker=null; }
   if(searchInfoWindow){ searchInfoWindow.close(); searchInfoWindow=null; }
 }
+function toggleClearBtn(inputId, btnId){
+  const input=document.getElementById(inputId), btn=document.getElementById(btnId);
+  if(!input||!btn) return;
+  btn.classList.toggle('show', !!input.value);
+}
 function directionsURL(tech){
   const coords=COORDS[tech.name];
   const origin=tech.address?tech.address:(coords?`${coords.lat},${coords.lng}`:tech.name);
@@ -350,12 +369,14 @@ function focusResponderFromList(name){
     bounds.extend(new google.maps.LatLng(coords.lat,coords.lng));
     const mapDiv=document.getElementById('map');
     const mapWidth=mapDiv?mapDiv.clientWidth:1000;
+    // Push fitted area to the right side of the screen so pins clear the centered panel
     const padLeft=Math.min(Math.floor(mapWidth*0.55),Math.floor(mapWidth/2)+200);
     map.fitBounds(bounds,{top:80,right:60,bottom:80,left:padLeft});
   }else{
     map.panTo(coords);
     map.setZoom(9);
   }
+  // Open info window + brief bounce to emphasize
   if(openInfoWindow) openInfoWindow.close();
   google.maps.event.trigger(marker,'click');
   marker.setAnimation(google.maps.Animation.BOUNCE);
@@ -385,6 +406,7 @@ function selectResponder(name){
   const match=markers.find(({tech})=>tech.name===name);
   if(!match) return;
   const {marker,tech}=match;
+  // Clear name filter so the selected marker is visible
   document.getElementById('search').value='';
   applyFilters();
   marker.setVisible(true);
@@ -410,6 +432,7 @@ async function findNearest(){
     const stateAbbr=d.places[0]['state abbreviation']||'';
     const locLabel=placeName?`${placeName}, ${stateAbbr}`:zip;
 
+    // Drop a pin at the exact searched zip code location
     clearSearchMarker();
     searchMarker=new google.maps.Marker({
       position:{lat,lng},
@@ -437,6 +460,7 @@ async function findNearest(){
 
     const showInactive=document.getElementById('toggle-inactive').checked;
     const service=document.getElementById('f-service').value;
+    // Exclude Regional Managers and Service Delivery Managers; respect Service filter if set
     const ranked=markers
       .filter(({tech})=>COORDS[tech.name]&&(showInactive||!isInactive(tech))&&!isRM(tech)&&!isSDM(tech)&&(!service||tech.services.includes(service)))
       .map(({tech})=>({...tech,dist:haversine(lat,lng,COORDS[tech.name].lat,COORDS[tech.name].lng)}))
@@ -463,6 +487,7 @@ async function findNearest(){
     document.getElementById('zip-results').style.display='block';
     map.setZoom(7);
     map.panTo({lat,lng});
+    // Offset the map so the dropped pin sits to the right of the results panel, not behind it
     map.panBy(-210,0);
   }catch(e){alert('Error geocoding zip code.');}
 }
@@ -478,8 +503,16 @@ async function initMap(){
   markers=allTechs.map(makeMarker).filter(Boolean);
   applyFilters();
   ['f-region','f-service','f-rating','f-bilingual'].forEach(id=>document.getElementById(id).addEventListener('change',applyFilters));
-  document.getElementById('search').addEventListener('input',()=>{applyFilters();showNameDropdown();});
+  document.getElementById('search').addEventListener('input',()=>{applyFilters();showNameDropdown();toggleClearBtn('search','search-clear');});
   document.getElementById('search').addEventListener('focus',showNameDropdown);
+  document.getElementById('search-clear').addEventListener('click',()=>{
+    const i=document.getElementById('search');
+    i.value='';
+    toggleClearBtn('search','search-clear');
+    applyFilters();
+    document.getElementById('name-dropdown').style.display='none';
+    i.focus();
+  });
   document.getElementById('name-dropdown').addEventListener('click',e=>{
     const item=e.target.closest('.dd-item');
     if(item) selectResponder(item.getAttribute('data-name'));
@@ -490,6 +523,16 @@ async function initMap(){
   document.getElementById('toggle-inactive').addEventListener('change',applyFilters);
   document.getElementById('zip-btn').addEventListener('click',findNearest);
   document.getElementById('zip-input').addEventListener('keydown',e=>{if(e.key==='Enter')findNearest();});
+  document.getElementById('zip-input').addEventListener('input',()=>toggleClearBtn('zip-input','zip-clear'));
+  document.getElementById('zip-clear').addEventListener('click',()=>{
+    const i=document.getElementById('zip-input');
+    i.value='';
+    toggleClearBtn('zip-input','zip-clear');
+    document.getElementById('zip-results').style.display='none';
+    clearSearchMarker();
+    lastSearchedLoc=null;
+    i.focus();
+  });
   document.getElementById('zip-close').addEventListener('click',()=>{
     document.getElementById('zip-results').style.display='none';
     clearSearchMarker();

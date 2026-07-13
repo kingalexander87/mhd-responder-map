@@ -419,6 +419,37 @@ function findFlaggedResponder(rawValue) {
   return null;
 }
 
+// Distance → color mapping for the responder-assignment web.
+// Thresholds locked in by Alex 2026-06-02:
+//   < 50 mi = green, 50-196 = yellow, 197-413 = orange, ≥ 414 = red (bold).
+function distanceColor(miles) {
+  if (miles < 50)  return '#16a34a';
+  if (miles < 197) return '#eab308';
+  if (miles < 414) return '#f97316';
+  return '#dc2626';
+}
+function distanceIsRed(miles) { return miles >= 414; }
+
+// For a given WO, return an array of { responder, distance } for each matched
+// responder on MASTER. Multi-responder WOs (";" or "/") produce multiple entries.
+// Skips flagged responders (Tracy/Brown/Denmon) — those already surface in the
+// Warnings panel and shouldn't clutter the web with lines from ex-employees.
+function woAssignments(w) {
+  if (!w.responder || isNaN(w.lat) || isNaN(w.lng)) return [];
+  const out = [];
+  String(w.responder).split(/\s*[\/;]\s*/).forEach(part => {
+    const p = part.trim();
+    if (!p) return;
+    const flatLower = p.toLowerCase().replace(/\s+/g, ' ');
+    if (RESPONDER_FLAGS[flatLower]) return;
+    const key = normRespName(p);
+    const resp = respData.find(r => normRespName(r.name) === key);
+    if (!resp || isNaN(resp.lat) || isNaN(resp.lng)) return;
+    out.push({ responder: resp, distance: distMiles(resp.lat, resp.lng, w.lat, w.lng) });
+  });
+  return out;
+}
+
 // ============================================================
 // State
 // ============================================================
@@ -434,6 +465,7 @@ let cwonData = [], rebookData = [], ecnsData = [];
 let cwonHeatLayer, cwonMarkerLayer;        // Closed Won historical (gold gradient)
 let rebookHeatLayer, rebookMarkerLayer;    // Rebook open pipeline (purple gradient)
 let ecnsHeatLayer, ecnsMarkerLayer;        // ECNS open pipeline (teal gradient)
+let assignmentLinesLayer;                  // Responder→WO assignment web (polylines colored by distance)
 
 // ============================================================
 // Init
@@ -490,6 +522,10 @@ function initMap() {
   });
   ecnsMarkerLayer = L.layerGroup();
 
+  // Responder Assignments — polyline "web" from each responder to each assigned WO.
+  // OFF by default; toggled via layer control. Populated in redraw().
+  assignmentLinesLayer = L.layerGroup();
+
   // Three separate responder layers so each can be toggled independently
   respActiveLayer = L.layerGroup().addTo(map);
   respLeadLayer = L.layerGroup().addTo(map);
@@ -503,6 +539,7 @@ function initMap() {
     '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:linear-gradient(135deg,#fef3c7 0%,#fde68a 40%,#d97706 80%,#92400e 100%);margin-right:6px;vertical-align:-2px;box-shadow:0 0 0 1px rgba(0,0,0,0.08);"></span> Closed Won (heat)': cwonHeatLayer,
     '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:linear-gradient(135deg,#ede9fe 0%,#c4b5fd 40%,#8b5cf6 80%,#3b0764 100%);margin-right:6px;vertical-align:-2px;box-shadow:0 0 0 1px rgba(0,0,0,0.08);"></span> Rebook (heat)': rebookHeatLayer,
     '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:linear-gradient(135deg,#ccfbf1 0%,#5eead4 40%,#14b8a6 80%,#134e4a 100%);margin-right:6px;vertical-align:-2px;box-shadow:0 0 0 1px rgba(0,0,0,0.08);"></span> ECNS (heat)': ecnsHeatLayer,
+    '<span style="display:inline-block;width:16px;height:3px;background:linear-gradient(90deg,#16a34a 0%,#16a34a 25%,#eab308 25%,#eab308 50%,#f97316 50%,#f97316 75%,#dc2626 75%,#dc2626 100%);margin-right:6px;vertical-align:2px;"></span> Responder → WO (assignments)': assignmentLinesLayer,
     '<span style="display:inline-block;width:11px;height:11px;background:#2563eb;border-radius:3px;margin-right:6px;vertical-align:-1px;box-shadow:0 0 0 1px rgba(255,255,255,0.6),0 0 0 2px rgba(37,99,235,0.5);"></span> Safety Responders': respActiveLayer,
     '<span style="display:inline-block;width:13px;height:13px;background:#ec4899;border-radius:3px;margin-right:6px;vertical-align:-2px;box-shadow:0 0 0 1px rgba(255,255,255,0.6),0 0 0 2px rgba(236,72,153,0.5);"></span> Managers &amp; SDM': respLeadLayer,
     '<span style="display:inline-block;width:11px;height:11px;background:#9ca3af;border-radius:3px;margin-right:6px;vertical-align:-1px;opacity:0.7;"></span> On Leave (inactive)': respInactiveLayer
@@ -922,6 +959,35 @@ function redraw() {
     });
     m.bindPopup(buildWoPopup(c), { maxWidth: 320 });
     m.addTo(woMarkerLayer);
+  });
+
+  // ===== Responder Assignment web =====
+  // Draws a polyline from each responder's home to each of their filtered WOs.
+  // Color = one-way distance bucket; red lines (≥414 mi) are thicker + fully opaque
+  // to surface long-haul assignments at a glance. Respects current filters (only
+  // draws lines for WOs currently on the map).
+  assignmentLinesLayer.clearLayers();
+  filteredWOs.forEach(w => {
+    woAssignments(w).forEach(a => {
+      const red = distanceIsRed(a.distance);
+      const line = L.polyline(
+        [[a.responder.lat, a.responder.lng], [w.lat, w.lng]],
+        {
+          color: distanceColor(a.distance),
+          weight: red ? 3 : 1.5,
+          opacity: red ? 0.9 : 0.55,
+          dashArray: red ? null : '4,3'
+        }
+      );
+      const miles = Math.round(a.distance);
+      line.bindTooltip(
+        escapeHtml(a.responder.name) + ' → WO ' + escapeHtml(w.wo) + ' · ' +
+        escapeHtml(w.city || '?') + ', ' + escapeHtml(w.state || '?') +
+        ' · <b>' + miles + ' mi</b>',
+        { sticky: true, direction: 'top' }
+      );
+      line.addTo(assignmentLinesLayer);
+    });
   });
 
   // Responder filter — region + rating + service capability.
@@ -1354,11 +1420,21 @@ function buildWoPopup(c) {
     // If the assigned responder is flagged (sales / ex-employee), render a red callout
     // so Alex can spot it and reassign instead of a plain Responder line.
     const flag = findFlaggedResponder(w.responder);
+    // For non-flagged assignments, look up each responder + their one-way distance
+    // from home, colored by the same green/yellow/orange/red bucket as the web layer.
+    const assignments = flag ? [] : woAssignments(w);
+    const respLine = assignments.length > 0
+      ? assignments.map(a => {
+          const mi = Math.round(a.distance);
+          const col = distanceColor(a.distance);
+          return `<span style="color:#1f2937;">${escapeHtml(a.responder.name)}</span> <span style="background:${col};color:#fff;padding:1px 6px;border-radius:8px;font-size:10px;font-weight:600;vertical-align:1px;">${mi} mi</span>`;
+        }).join(' · ')
+      : (w.responder ? `<span style="color:#1f2937;">${escapeHtml(w.responder)}</span>` : '');
     const respBit = !w.responder
       ? ''
       : (flag
           ? `<div style="margin-top:3px;font-size:12px;background:#fef2f2;border-left:3px solid #b91c1c;padding:4px 8px;border-radius:3px;"><b style="color:#b91c1c;">⚠ Reassign:</b> ${escapeHtml(w.responder)}<div style="color:#7a0d05;font-size:11px;margin-top:1px;">${escapeHtml(flag.reason)}</div></div>`
-          : `<div style="margin-top:2px;font-size:12px;"><b style="color:#374151;">Responder:</b> <span style="color:#1f2937;">${escapeHtml(w.responder)}</span></div>`);
+          : `<div style="margin-top:2px;font-size:12px;"><b style="color:#374151;">Responder:</b> ${respLine}</div>`);
     // Confirmed Schedule Summary — capped for popup readability.
     const sumText = (w.summary || '').trim();
     const sumBit = sumText

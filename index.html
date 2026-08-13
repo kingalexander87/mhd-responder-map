@@ -89,7 +89,6 @@ input:checked+.slider:before{transform:translateX(16px)}
         <option value="QL Fit">QL Fit</option>
         <option value="PFT">PFT</option>
         <option value="Air Monitor">Air Monitor</option>
-        <option value="Dosimetry">Dosimetry</option>
         <option value="NLS">NLS</option>
         <option value="ENLS">ENLS</option>
       </select>
@@ -163,7 +162,7 @@ input:checked+.slider:before{transform:translateX(16px)}
 <script>
 const API_KEY  = "AIzaSyCXalP4vszPKPOVN9Y5pzNbfjJjF4VN7VY";
 const SHEET_ID = "14VbFR3dKRCb2LoalZQxTYMSN8g_IXhmCDQci3112D50";
-const SHEET_URL = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/MASTER!A3:V200?key=${API_KEY}`;
+const SHEET_URL = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/MASTER!A3:U200?key=${API_KEY}`;
 const RATING_COLORS = {7:"#1E8449",6:"#27AE60",5:"#F4D03F",4:"#E67E22",3:"#E74C3C",2:"#8B1A1A",1:"#4A4A4A",0:"#000000"};
 const COORDS = {
   "Allison, Terri":    {lat:29.5572,lng:-95.7835},
@@ -184,6 +183,7 @@ const COORDS = {
   "Hemingway, Sean":   {lat:26.1901,lng:-80.0959},
   "Hix, Todd":         {lat:34.5700,lng:-112.4685},
   "Hughes, Michael":   {lat:40.1737,lng:-80.2462},
+  "Hughes, Michael (FL)":{lat:29.1206,lng:-82.0287},
   "Jacob, John":       {lat:28.2108,lng:-82.4735},
   "Johnson, Curtis":   {lat:26.0056,lng:-80.2534},
   "Jones, Dan":        {lat:35.5829,lng:-78.7997},
@@ -223,17 +223,16 @@ function parseServices(row){
   if(row[12]==="Yes") s.push("QL Fit");
   if(row[13]==="Yes") s.push("PFT");
   if(row[15]==="Yes") s.push("Air Monitor");
-  if(row[16]==="Yes") s.push("Dosimetry");
-  if(row[17]==="Yes") s.push("NLS");
-  if(row[18]==="Yes") s.push("ENLS");
+  if(row[16]==="Yes") s.push("NLS");
+  if(row[17]==="Yes") s.push("ENLS");
   return s;
 }
 function techFromRow(row){
   return {
     name:row[0]||"",region:row[1]||"",state:row[2]||"",srtm:row[3]||"",bilingual:row[4]||"",
     title:row[5]||"",phone:row[6]||"",email:row[7]||"",address:row[8]||"",
-    audExp:row[10]||"",nioshExp:row[14]||"",rating:parseInt(row[19])||0,
-    notes:row[20]||"",flags:row[21]||"",services:parseServices(row),
+    audExp:row[10]||"",nioshExp:row[14]||"",rating:parseInt(row[18])||0,
+    notes:row[19]||"",flags:row[20]||"",services:parseServices(row),
   };
 }
 async function loadData(){

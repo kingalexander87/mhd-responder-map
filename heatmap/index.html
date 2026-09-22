@@ -473,9 +473,8 @@ let assignmentLinesLayer;                  // Responder→WO assignment web (pol
 function initMap() {
   map = L.map('map', { zoomControl: true, zoomSnap: 0.5 }).setView([39.5, -98.35], 4);
   // Voyager base — softer cartography with subtle water and land coloring; looks more designed than light_all.
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-    attribution: '© OpenStreetMap contributors © CARTO',
-    subdomains: 'abcd',
+   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors',
     maxZoom: 19
   }).addTo(map);
 

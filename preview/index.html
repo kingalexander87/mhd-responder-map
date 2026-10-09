@@ -370,10 +370,21 @@ function hashAngle(s){
 }
 function clearLeaderLines(){ leaderLines.forEach(l=>l.setMap(null)); leaderLines=[]; }
 
+// Web Mercator helpers. We compute these ourselves rather than calling
+// map.getProjection(), which comes back undefined on vector-rendered maps.
+function mercPx(lat,lng,scale){
+  const x=(lng+180)/360*256*scale;
+  const s=Math.max(-0.9999,Math.min(0.9999,Math.sin(lat*Math.PI/180)));
+  const y=(0.5-Math.log((1+s)/(1-s))/(4*Math.PI))*256*scale;
+  return {x,y};
+}
+function mercLatLng(x,y,scale){
+  const lng=x/(256*scale)*360-180;
+  const n=Math.PI-2*Math.PI*y/(256*scale);
+  return {lat:180/Math.PI*Math.atan(Math.sinh(n)),lng};
+}
 function spreadMarkers(){
-  if(!map||typeof map.getProjection!=='function') return;
-  const proj=map.getProjection();
-  if(!proj) return;                       // projection not ready yet
+  if(!map||typeof map.getZoom!=='function') return;
   const scale=Math.pow(2,map.getZoom());
   clearLeaderLines();
 
@@ -382,8 +393,8 @@ function spreadMarkers(){
     if(!marker.getVisible()) return;
     const c=COORDS[tech.name];
     if(!c) return;
-    const w=proj.fromLatLngToPoint(new google.maps.LatLng(c.lat,c.lng));
-    const x=w.x*scale, y=w.y*scale;
+    const w=mercPx(c.lat,c.lng,scale);
+    const x=w.x, y=w.y;
     pts.push({name:tech.name,marker,c,r:markerRadius(tech),x,y,px:x,py:y});
   });
   // Sort by name so the same crowd always fans out the same way. Without this
@@ -410,12 +421,12 @@ function spreadMarkers(){
   pts.forEach(p=>{
     const dist=Math.hypot(p.px-p.x,p.py-p.y);
     if(dist<0.5){ p.marker.setPosition(p.c); return; }
-    const ll=proj.fromPointToLatLng(new google.maps.Point(p.px/scale,p.py/scale));
+    const ll=mercLatLng(p.px,p.py,scale);
     p.marker.setPosition(ll);
     if(dist>=SPREAD_LEADER_MIN){
       leaderLines.push(new google.maps.Polyline({
         map, clickable:false, zIndex:0,
-        path:[{lat:p.c.lat,lng:p.c.lng},{lat:ll.lat(),lng:ll.lng()}],
+        path:[{lat:p.c.lat,lng:p.c.lng},{lat:ll.lat,lng:ll.lng}],
         strokeColor:'#1F3864', strokeOpacity:0.45, strokeWeight:1
       }));
     }
@@ -597,7 +608,6 @@ async function initMap(){
   applyFilters();
   map.addListener('idle',scheduleSpread);
   map.addListener('zoom_changed',scheduleSpread);
-  google.maps.event.addListenerOnce(map,'projection_changed',scheduleSpread);
   ['f-region','f-service','f-rating','f-bilingual'].forEach(id=>document.getElementById(id).addEventListener('change',applyFilters));
   document.getElementById('search').addEventListener('input',()=>{applyFilters();showNameDropdown();toggleClearBtn('search','search-clear');});
   document.getElementById('search').addEventListener('focus',showNameDropdown);

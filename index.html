@@ -195,9 +195,11 @@ const COORDS = {
   "Kearns, Brad":      {lat:47.2793,lng:-122.2284},
   "Kelley, Tim":       {lat:40.0918,lng:-82.6835},
   "McFarland, Ryan":   {lat:35.2271,lng:-80.8431},
+  "McGuire, Keith Wayne Cook":{lat:42.9075,lng:-85.8303},
   "Mills, Steve":      {lat:38.9498,lng:-76.1947},
   "Monteau, Don":      {lat:30.7974,lng:-81.6957},
   "Moreno, Ernie":     {lat:33.9425,lng:-117.2297},
+  "Muniz, Jose Alvaro": {lat:38.7470,lng:-104.7050},
   "Nicholas, Sidney":  {lat:42.3314,lng:-83.0458},
   "Payton, Treina":    {lat:37.5407,lng:-77.4360},
   "Phillips, Tony":    {lat:35.3960,lng:-80.6206},
@@ -233,7 +235,7 @@ function parseServices(row){
 }
 function techFromRow(row){
   return {
-    name:row[0]||"",region:row[1]||"",state:row[2]||"",srtm:row[3]||"",bilingual:row[4]||"",
+    name:(row[0]||"").trim(),region:row[1]||"",state:row[2]||"",srtm:row[3]||"",bilingual:row[4]||"",
     title:row[5]||"",phone:row[6]||"",email:row[7]||"",address:row[8]||"",
     audExp:row[10]||"",nioshExp:row[14]||"",rating:parseInt(row[18])||0,
     notes:row[19]||"",flags:row[20]||"",services:parseServices(row),

@@ -222,20 +222,23 @@ let map, allTechs=[], markers=[], openInfoWindow=null, searchMarker=null, search
 function isInactive(t){ return t.notes&&t.notes.toLowerCase().includes("on leave"); }
 function isRM(t){ return t.title&&t.title.toLowerCase().includes("regional manager"); }
 function isSDM(t){ return t.title&&t.title.toLowerCase().includes("service delivery"); }
+// Capability cells are typed by hand, so accept any casing and stray whitespace:
+// "Yes", "YES", "yes " all count. Anything else (blank, "No", "N/A") does not.
+function yesVal(v){ return String(v==null?"":v).trim().toLowerCase()==="yes"; }
 function parseServices(row){
   const s=[];
-  if(row[9]==="Yes") s.push("Audio");
-  if(row[11]==="Yes") s.push("QN Fit");
-  if(row[12]==="Yes") s.push("QL Fit");
-  if(row[13]==="Yes") s.push("PFT");
-  if(row[15]==="Yes") s.push("Air Monitor");
-  if(row[16]==="Yes") s.push("NLS");
-  if(row[17]==="Yes") s.push("ENLS");
+  if(yesVal(row[9]))  s.push("Audio");
+  if(yesVal(row[11])) s.push("QN Fit");
+  if(yesVal(row[12])) s.push("QL Fit");
+  if(yesVal(row[13])) s.push("PFT");
+  if(yesVal(row[15])) s.push("Air Monitor");
+  if(yesVal(row[16])) s.push("NLS");
+  if(yesVal(row[17])) s.push("ENLS");
   return s;
 }
 function techFromRow(row){
   return {
-    name:(row[0]||"").trim(),region:row[1]||"",state:row[2]||"",srtm:row[3]||"",bilingual:row[4]||"",
+    name:(row[0]||"").trim(),region:row[1]||"",state:row[2]||"",srtm:row[3]||"",bilingual:yesVal(row[4])?"Yes":"",
     title:row[5]||"",phone:row[6]||"",email:row[7]||"",address:row[8]||"",
     audExp:row[10]||"",nioshExp:row[14]||"",rating:parseInt(row[18])||0,
     notes:row[19]||"",flags:row[20]||"",services:parseServices(row),
